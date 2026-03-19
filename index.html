@@ -3,60 +3,24 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>簡易 音MADジェネレーター</title>
+    <title>音MADジェネレーター Pro</title>
     <script src="https://unpkg.com/@tonejs/midi"></script>
     <style>
-        body {
-            font-family: 'Segoe UI', Meiryo, sans-serif;
-            background-color: #f4f4f9;
-            color: #333;
-            padding: 20px;
-            line-height: 1.6;
-        }
-        .container {
-            max-width: 600px;
-            margin: 0 auto;
-            background: #fff;
-            padding: 30px;
-            border-radius: 8px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        }
-        h1 {
-            font-size: 24px;
-            border-bottom: 2px solid #5c6bc0;
-            padding-bottom: 10px;
-        }
-        .control-group {
-            margin-bottom: 20px;
-        }
-        label {
-            display: block;
-            font-weight: bold;
-            margin-bottom: 5px;
-        }
-        input[type="file"], input[type="number"] {
-            width: 100%;
-            padding: 10px;
-            border: 1px solid #ccc;
-            border-radius: 4px;
-            box-sizing: border-box;
-        }
-        .button-group {
-            display: flex;
-            gap: 10px;
-            margin-top: 20px;
-        }
-        button {
-            flex: 1;
-            padding: 12px;
-            font-size: 16px;
-            font-weight: bold;
-            color: #fff;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            transition: background-color 0.2s;
-        }
+        body { font-family: 'Segoe UI', Meiryo, sans-serif; background-color: #f4f4f9; color: #333; padding: 20px; line-height: 1.6; }
+        .container { max-width: 650px; margin: 0 auto; background: #fff; padding: 30px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        h1 { font-size: 24px; border-bottom: 2px solid #5c6bc0; padding-bottom: 10px; }
+        .control-group { margin-bottom: 20px; background: #fafafa; padding: 15px; border-radius: 6px; border: 1px solid #eee; }
+        label { display: block; font-weight: bold; margin-bottom: 5px; color: #3f51b5; }
+        input[type="file"], input[type="number"] { width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+        .flex-row { display: flex; gap: 10px; }
+        .flex-row > div { flex: 1; }
+        .button-group { display: flex; gap: 10px; margin-top: 20px; }
+        button { flex: 1; padding: 12px; font-size: 16px; font-weight: bold; color: #fff; border: none; border-radius: 4px; cursor: pointer; transition: background-color 0.2s; }
+        
+        #generate-btn { background-color: #ff9800; }
+        #generate-btn:disabled { background-color: #ffcc80; cursor: not-allowed; }
+        #generate-btn:hover:not(:disabled) { background-color: #e68a00; }
+
         #play-btn { background-color: #4caf50; }
         #play-btn:disabled { background-color: #a5d6a7; cursor: not-allowed; }
         #play-btn:hover:not(:disabled) { background-color: #45a049; }
@@ -64,151 +28,264 @@
         #stop-btn { background-color: #f44336; }
         #stop-btn:disabled { background-color: #ef9a9a; cursor: not-allowed; }
         #stop-btn:hover:not(:disabled) { background-color: #da190b; }
+
+        #download-btn { background-color: #2196f3; }
+        #download-btn:disabled { background-color: #90caf9; cursor: not-allowed; }
+        #download-btn:hover:not(:disabled) { background-color: #1e88e5; }
         
-        .note {
-            font-size: 0.9em;
-            color: #666;
-            margin-top: 5px;
-        }
+        .note { font-size: 0.85em; color: #666; margin-top: 5px; }
+        #status { text-align: center; font-weight: bold; margin-top: 15px; color: #e91e63; }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <h1>簡易 音MADジェネレーター</h1>
+    <h1>音MADジェネレーター Pro</h1>
     
     <div class="control-group">
         <label for="audio-file">1. 素材音声 (WAV / MP3など)</label>
         <input type="file" id="audio-file" accept="audio/*">
-        <div class="note">※「あ」などの短い単音の音声ファイルがおすすめです。</div>
+        
+        <div class="flex-row" style="margin-top: 10px;">
+            <div>
+                <label for="trim-start" style="font-size: 0.9em;">開始時間 (秒)</label>
+                <input type="number" id="trim-start" value="0" step="0.01" min="0">
+            </div>
+            <div>
+                <label for="trim-end" style="font-size: 0.9em;">終了時間 (秒)</label>
+                <input type="number" id="trim-end" value="1" step="0.01" min="0.01">
+            </div>
+        </div>
+        <div class="note">※音声の使いたい部分だけを切り抜けます。先頭の無音をカットするとタイミングが合います。</div>
     </div>
 
     <div class="control-group">
         <label for="midi-file">2. 楽譜ファイル (MIDI)</label>
         <input type="file" id="midi-file" accept=".mid,.midi">
-        <div class="note">※メロディが入力されたMIDIファイルを指定してください。</div>
     </div>
 
     <div class="control-group">
-        <label for="base-note">3. 素材音声の基準音程 (MIDIノート番号)</label>
+        <label for="base-note">3. 素材の基準音程 (MIDIノート番号)</label>
         <input type="number" id="base-note" value="60">
-        <div class="note">※60は「真ん中のド(C4)」です。音声の元の音程に合わせて調整してください。</div>
+        <div class="note">※60=C4(ド)。切り抜いた音声の元の高さに合わせてください。合わない場合は数値を上下させて調整します。</div>
     </div>
 
+    <button id="generate-btn" disabled>⚙️ 結合して生成する</button>
+    <div id="status">ファイルを選択してください</div>
+
     <div class="button-group">
-        <button id="play-btn" disabled>▶ 再生する</button>
+        <button id="play-btn" disabled>▶ 再生</button>
         <button id="stop-btn" disabled>■ 停止</button>
+        <button id="download-btn" disabled>⬇ ダウンロード(WAV)</button>
     </div>
 </div>
 
 <script>
-    let audioContext;
-    let audioBuffer;
+    let audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    let originalAudioBuffer;
     let midiData;
-    let activeSources = [];
+    let renderedBuffer; // 生成済みの音声データ
+    let currentSource = null;
 
     const audioInput = document.getElementById('audio-file');
     const midiInput = document.getElementById('midi-file');
+    const trimStartInput = document.getElementById('trim-start');
+    const trimEndInput = document.getElementById('trim-end');
+    const baseNoteInput = document.getElementById('base-note');
+    
+    const generateBtn = document.getElementById('generate-btn');
     const playBtn = document.getElementById('play-btn');
     const stopBtn = document.getElementById('stop-btn');
-    const baseNoteInput = document.getElementById('base-note');
+    const downloadBtn = document.getElementById('download-btn');
+    const statusText = document.getElementById('status');
 
-    // WAV/MP3の読み込み
+    // WAV読み込み
     audioInput.addEventListener('change', async (e) => {
         const file = e.target.files[0];
         if (!file) return;
-        
-        if (!audioContext) {
-            audioContext = new (window.AudioContext || window.webkitAudioContext)();
-        }
-        
         const arrayBuffer = await file.arrayBuffer();
-        audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+        originalAudioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+        trimEndInput.value = originalAudioBuffer.duration.toFixed(2);
         checkReady();
     });
 
-    // MIDIの読み込み
+    // MIDI読み込み
     midiInput.addEventListener('change', async (e) => {
         const file = e.target.files[0];
         if (!file) return;
-        
         const arrayBuffer = await file.arrayBuffer();
         midiData = new Midi(arrayBuffer);
         checkReady();
     });
 
-    // 両方のファイルが読み込まれたら再生ボタンを有効化
     function checkReady() {
-        if (audioBuffer && midiData) {
-            playBtn.disabled = false;
+        if (originalAudioBuffer && midiData) {
+            generateBtn.disabled = false;
+            statusText.textContent = "準備完了！「生成する」を押してください。";
         }
     }
 
-    // 再生処理
+    // ★ 音声生成（レンダリング）処理
+    generateBtn.addEventListener('click', async () => {
+        generateBtn.disabled = true;
+        statusText.textContent = "⏳ 生成中...";
+        
+        try {
+            const track = midiData.tracks.find(t => t.notes.length > 0);
+            if (!track) throw new Error("MIDIに音符がありません。");
+
+            // MIDIの最後の音符の終了時間を取得
+            const lastNote = track.notes[track.notes.length - 1];
+            const totalDuration = lastNote.time + lastNote.duration + 2.0; // 余韻のために2秒追加
+
+            // バックグラウンドで音声を構築するコンテキスト
+            const offlineCtx = new OfflineAudioContext(2, 44100 * totalDuration, 44100);
+            const baseNote = parseInt(baseNoteInput.value, 10);
+            const trimStart = parseFloat(trimStartInput.value);
+            const trimEnd = parseFloat(trimEndInput.value);
+            const sampleDuration = Math.max(0.01, trimEnd - trimStart);
+
+            // 切り抜いた部分だけのバッファを作成（メモリ効率とタイミング安定のため）
+            const slicedBuffer = offlineCtx.createBuffer(
+                originalAudioBuffer.numberOfChannels,
+                sampleDuration * originalAudioBuffer.sampleRate,
+                originalAudioBuffer.sampleRate
+            );
+            for (let i = 0; i < originalAudioBuffer.numberOfChannels; i++) {
+                const channelData = originalAudioBuffer.getChannelData(i);
+                const slicedData = slicedBuffer.getChannelData(i);
+                const startOffset = Math.floor(trimStart * originalAudioBuffer.sampleRate);
+                for (let j = 0; j < slicedData.length; j++) {
+                    slicedData[j] = channelData[startOffset + j] || 0;
+                }
+            }
+
+            // MIDIの音符に合わせて配置
+            track.notes.forEach(note => {
+                const source = offlineCtx.createBufferSource();
+                source.buffer = slicedBuffer;
+                
+                // ピッチ変更 (再生速度)
+                const pitchRatio = Math.pow(2, (note.midi - baseNote) / 12);
+                source.playbackRate.value = pitchRatio;
+                
+                const gainNode = offlineCtx.createGain();
+                const noteStart = note.time;
+                const actualDuration = note.duration;
+
+                // プツ音防止のエンベロープ
+                gainNode.gain.setValueAtTime(0, noteStart);
+                gainNode.gain.linearRampToValueAtTime(1, noteStart + 0.01);
+                
+                const releaseTime = Math.min(0.05, actualDuration / 2);
+                gainNode.gain.setValueAtTime(1, noteStart + actualDuration - releaseTime);
+                gainNode.gain.linearRampToValueAtTime(0, noteStart + actualDuration);
+                
+                source.connect(gainNode);
+                gainNode.connect(offlineCtx.destination);
+                
+                source.start(noteStart);
+                // 再生速度が変わるため、元の音声長さに合わせて停止時間を計算
+                const stopTime = noteStart + (sampleDuration / pitchRatio);
+                source.stop(Math.min(stopTime, noteStart + actualDuration + 0.1));
+            });
+
+            // レンダリング実行
+            renderedBuffer = await offlineCtx.startRendering();
+            
+            statusText.textContent = "✅ 生成完了！再生・ダウンロードが可能です。";
+            statusText.style.color = "#4caf50";
+            playBtn.disabled = false;
+            downloadBtn.disabled = false;
+
+        } catch (error) {
+            statusText.textContent = "❌ エラーが発生しました: " + error.message;
+            statusText.style.color = "#f44336";
+        } finally {
+            generateBtn.disabled = false;
+        }
+    });
+
+    // 再生処理（レンダリング済みのバッファを再生）
     playBtn.addEventListener('click', () => {
-        if (!audioContext) return;
+        if (!renderedBuffer) return;
         if (audioContext.state === 'suspended') audioContext.resume();
         
-        stopAudio(); // 前の再生を停止
+        stopAudio();
         
-        const baseNote = parseInt(baseNoteInput.value, 10);
-        const startTime = audioContext.currentTime + 0.1; // 少しだけ遅らせて安定再生
-        
-        // 音符データが含まれている最初のトラックを取得
-        const track = midiData.tracks.find(t => t.notes.length > 0);
-        if (!track) {
-            alert('MIDIファイルの中に音符データが見つかりません。');
-            return;
-        }
-
-        track.notes.forEach(note => {
-            const source = audioContext.createBufferSource();
-            source.buffer = audioBuffer;
-            
-            // ピッチシフト（再生速度の変更）の計算
-            // 半音上がるごとに 2の(1/12)乗 倍速く再生する
-            const pitchRatio = Math.pow(2, (note.midi - baseNote) / 12);
-            source.playbackRate.value = pitchRatio;
-            
-            // プツプツ音（クリップ・ノイズ）を防ぐためのエンベロープ（音量調整）
-            const gainNode = audioContext.createGain();
-            const noteStart = startTime + note.time;
-            const noteDuration = note.duration;
-            
-            gainNode.gain.setValueAtTime(0, noteStart);
-            gainNode.gain.linearRampToValueAtTime(1, noteStart + 0.01); // 10msでフェードイン
-            
-            // 音符の長さに合わせてフェードアウト
-            const releaseTime = Math.min(0.05, noteDuration / 2);
-            gainNode.gain.setValueAtTime(1, noteStart + noteDuration - releaseTime);
-            gainNode.gain.linearRampToValueAtTime(0, noteStart + noteDuration);
-            
-            // 接続して再生スケジュールを組む
-            source.connect(gainNode);
-            gainNode.connect(audioContext.destination);
-            
-            source.start(noteStart);
-            source.stop(noteStart + noteDuration);
-            
-            activeSources.push(source);
-        });
+        currentSource = audioContext.createBufferSource();
+        currentSource.buffer = renderedBuffer;
+        currentSource.connect(audioContext.destination);
+        currentSource.start(0);
         
         stopBtn.disabled = false;
+        
+        currentSource.onended = () => {
+            stopBtn.disabled = true;
+        };
     });
 
     // 停止処理
     stopBtn.addEventListener('click', stopAudio);
 
     function stopAudio() {
-        activeSources.forEach(source => {
-            try {
-                source.stop();
-            } catch (e) {
-                // すでに停止しているソースのエラーを無視
-            }
-        });
-        activeSources = [];
+        if (currentSource) {
+            try { currentSource.stop(); } catch (e) {}
+            currentSource = null;
+        }
         stopBtn.disabled = true;
+    }
+
+    // ★ WAVダウンロード処理
+    downloadBtn.addEventListener('click', () => {
+        if (!renderedBuffer) return;
+        
+        const wavBlob = audioBufferToWav(renderedBuffer);
+        const url = URL.createObjectURL(wavBlob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'oto_mad_track.wav';
+        a.click();
+        URL.revokeObjectURL(url);
+    });
+
+    // AudioBufferをWAV形式に変換する関数
+    function audioBufferToWav(buffer) {
+        let numOfChan = buffer.numberOfChannels,
+            length = buffer.length * numOfChan * 2 + 44,
+            bufferArray = new ArrayBuffer(length),
+            view = new DataView(bufferArray),
+            channels = [], i, sample, offset = 0, pos = 0;
+
+        function setUint16(data) { view.setUint16(pos, data, true); pos += 2; }
+        function setUint32(data) { view.setUint32(pos, data, true); pos += 4; }
+
+        setUint32(0x46464952); // "RIFF"
+        setUint32(length - 8);
+        setUint32(0x45564157); // "WAVE"
+        setUint32(0x20746d66); // "fmt " chunk
+        setUint32(16);
+        setUint16(1);
+        setUint16(numOfChan);
+        setUint32(buffer.sampleRate);
+        setUint32(buffer.sampleRate * 2 * numOfChan);
+        setUint16(numOfChan * 2);
+        setUint16(16);
+        setUint32(0x61746164); // "data" chunk
+        setUint32(length - pos - 4);
+
+        for(i = 0; i < buffer.numberOfChannels; i++) channels.push(buffer.getChannelData(i));
+
+        while(pos < length) {
+            for(i = 0; i < numOfChan; i++) {
+                sample = Math.max(-1, Math.min(1, channels[i][offset]));
+                sample = (0.5 + sample < 0 ? sample * 32768 : sample * 32767)|0;
+                view.setInt16(pos, sample, true);
+                pos += 2;
+            }
+            offset++;
+        }
+        return new Blob([bufferArray], {type: "audio/wav"});
     }
 </script>
 
