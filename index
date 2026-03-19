@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>簡易 音MADジェネレーター</title>
+    <script src="https://unpkg.com/@tonejs/midi"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Meiryo, sans-serif;
+            background-color: #f4f4f9;
+            color: #333;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            background: #fff;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        h1 {
+            font-size: 24px;
+            border-bottom: 2px solid #5c6bc0;
+            padding-bottom: 10px;
+        }
+        .control-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        input[type="file"], input[type="number"] {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        .button-group {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+        }
+        button {
+            flex: 1;
+            padding: 12px;
+            font-size: 16px;
+            font-weight: bold;
+            color: #fff;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        #play-btn { background-color: #4caf50; }
+        #play-btn:disabled { background-color: #a5d6a7; cursor: not-allowed; }
+        #play-btn:hover:not(:disabled) { background-color: #45a049; }
+        
+        #stop-btn { background-color: #f44336; }
+        #stop-btn:disabled { background-color: #ef9a9a; cursor: not-allowed; }
+        #stop-btn:hover:not(:disabled) { background-color: #da190b; }
+        
+        .note {
+            font-size: 0.9em;
+            color: #666;
+            margin-top: 5px;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>簡易 音MADジェネレーター</h1>
+    
+    <div class="control-group">
+        <label for="audio-file">1. 素材音声 (WAV / MP3など)</label>
+        <input type="file" id="audio-file" accept="audio/*">
+        <div class="note">※「あ」などの短い単音の音声ファイルがおすすめです。</div>
+    </div>
+
+    <div class="control-group">
+        <label for="midi-file">2. 楽譜ファイル (MIDI)</label>
+        <input type="file" id="midi-file" accept=".mid,.midi">
+        <div class="note">※メロディが入力されたMIDIファイルを指定してください。</div>
+    </div>
+
+    <div class="control-group">
+        <label for="base-note">3. 素材音声の基準音程 (MIDIノート番号)</label>
+        <input type="number" id="base-note" value="60">
+        <div class="note">※60は「真ん中のド(C4)」です。音声の元の音程に合わせて調整してください。</div>
+    </div>
+
+    <div class="button-group">
+        <button id="play-btn" disabled>▶ 再生する</button>
+        <button id="stop-btn" disabled>■ 停止</button>
+    </div>
+</div>
+
+<script>
+    let audioContext;
+    let audioBuffer;
+    let midiData;
+    let activeSources = [];
+
+    const audioInput = document.getElementById('audio-file');
+    const midiInput = document.getElementById('midi-file');
+    const playBtn = document.getElementById('play-btn');
+    const stopBtn = document.getElementById('stop-btn');
+    const baseNoteInput = document.getElementById('base-note');
+
+    // WAV/MP3の読み込み
+    audioInput.addEventListener('change', async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        
+        if (!audioContext) {
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        
+        const arrayBuffer = await file.arrayBuffer();
+        audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+        checkReady();
+    });
+
+    // MIDIの読み込み
+    midiInput.addEventListener('change', async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        
+        const arrayBuffer = await file.arrayBuffer();
+        midiData = new Midi(arrayBuffer);
+        checkReady();
+    });
+
+    // 両方のファイルが読み込まれたら再生ボタンを有効化
+    function checkReady() {
+        if (audioBuffer && midiData) {
+            playBtn.disabled = false;
+        }
+    }
+
+    // 再生処理
+    playBtn.addEventListener('click', () => {
+        if (!audioContext) return;
+        if (audioContext.state === 'suspended') audioContext.resume();
+        
+        stopAudio(); // 前の再生を停止
+        
+        const baseNote = parseInt(baseNoteInput.value, 10);
+        const startTime = audioContext.currentTime + 0.1; // 少しだけ遅らせて安定再生
+        
+        // 音符データが含まれている最初のトラックを取得
+        const track = midiData.tracks.find(t => t.notes.length > 0);
+        if (!track) {
+            alert('MIDIファイルの中に音符データが見つかりません。');
+            return;
+        }
+
+        track.notes.forEach(note => {
+            const source = audioContext.createBufferSource();
+            source.buffer = audioBuffer;
+            
+            // ピッチシフト（再生速度の変更）の計算
+            // 半音上がるごとに 2の(1/12)乗 倍速く再生する
+            const pitchRatio = Math.pow(2, (note.midi - baseNote) / 12);
+            source.playbackRate.value = pitchRatio;
+            
+            // プツプツ音（クリップ・ノイズ）を防ぐためのエンベロープ（音量調整）
+            const gainNode = audioContext.createGain();
+            const noteStart = startTime + note.time;
+            const noteDuration = note.duration;
+            
+            gainNode.gain.setValueAtTime(0, noteStart);
+            gainNode.gain.linearRampToValueAtTime(1, noteStart + 0.01); // 10msでフェードイン
+            
+            // 音符の長さに合わせてフェードアウト
+            const releaseTime = Math.min(0.05, noteDuration / 2);
+            gainNode.gain.setValueAtTime(1, noteStart + noteDuration - releaseTime);
+            gainNode.gain.linearRampToValueAtTime(0, noteStart + noteDuration);
+            
+            // 接続して再生スケジュールを組む
+            source.connect(gainNode);
+            gainNode.connect(audioContext.destination);
+            
+            source.start(noteStart);
+            source.stop(noteStart + noteDuration);
+            
+            activeSources.push(source);
+        });
+        
+        stopBtn.disabled = false;
+    });
+
+    // 停止処理
+    stopBtn.addEventListener('click', stopAudio);
+
+    function stopAudio() {
+        activeSources.forEach(source => {
+            try {
+                source.stop();
+            } catch (e) {
+                // すでに停止しているソースのエラーを無視
+            }
+        });
+        activeSources = [];
+        stopBtn.disabled = true;
+    }
+</script>
+
+</body>
+</html>
