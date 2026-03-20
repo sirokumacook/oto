@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>音MADジェネレーター (プレビュー機能付き・修正版)</title>
+    <title>音MADジェネレーター</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tonejs/midi"></script>
     <style>
@@ -78,7 +78,6 @@
             font-size: 1em;
             width: 100%;
             transition: background-color 0.2s;
-            margin-bottom: 10px;
         }
         button:hover {
             background-color: #005f9e;
@@ -89,15 +88,10 @@
         }
         .preview-btn {
             background-color: #28a745;
+            margin-bottom: 10px;
         }
         .preview-btn:hover {
             background-color: #218838;
-        }
-        .stop-btn {
-            background-color: #dc3545;
-        }
-        .stop-btn:hover {
-            background-color: #c82333;
         }
         #status {
             margin-top: 15px;
@@ -106,21 +100,11 @@
             color: #ffcc00;
             word-break: break-all;
         }
-        #resultArea {
+        #downloadArea {
             margin-top: 20px;
-            padding: 15px;
-            background-color: #2a2a2a;
-            border: 1px solid #4daafc;
-            border-radius: 6px;
             display: none;
         }
-        #resultArea h2 {
-            margin-top: 0;
-            font-size: 1.1em;
-            color: #4daafc;
-            text-align: center;
-        }
-        #downloadLink {
+        #downloadArea a {
             display: block;
             text-align: center;
             background-color: #e51400;
@@ -129,16 +113,9 @@
             text-decoration: none;
             border-radius: 4px;
             font-weight: bold;
-            margin-top: 10px;
         }
-        #downloadLink:hover {
+        #downloadArea a:hover {
             background-color: #b30f00;
-        }
-        .note {
-            font-size: 0.8em;
-            color: #bbb;
-            margin-top: 5px;
-            margin-bottom: 10px;
         }
     </style>
 </head>
@@ -162,7 +139,7 @@
                 <input type="number" id="trimEnd" value="1" min="0.01" step="0.01">
             </div>
         </div>
-        <div class="note">元の音の高さは「C4 (ド)」として扱われます。</div>
+        <p style="font-size: 0.8em; color: #bbb;">※元の音の高さは「C4 (ド)」として扱われます。</p>
         <button class="preview-btn" id="previewBtn" disabled>切り抜いた音声をプレビュー</button>
     </div>
 
@@ -173,24 +150,12 @@
     </div>
 
     <div class="section">
-        <h2>3. エフェクトの設定</h2>
-        <label>激しいエフェクトを開始する時間 (秒)</label>
-        <input type="number" id="effectStart" value="16.0" min="0" step="0.1">
-        <div class="note">生成される楽曲の中で、この時間以降から音圧や歪みが強くなります。</div>
-    </div>
-
-    <div class="section">
-        <h2>4. 音声の生成</h2>
-        <button id="generateBtn" disabled>MIDIに合わせて音声を生成する</button>
+        <h2>3. 生成</h2>
+        <button id="generateBtn" disabled>音声を生成する</button>
         <div id="status"></div>
     </div>
 
-    <div id="resultArea">
-        <h2>生成結果</h2>
-        <div class="input-group">
-            <button class="preview-btn" id="playResultBtn">生成した音声をプレビュー</button>
-            <button class="stop-btn" id="stopResultBtn" disabled>停止</button>
-        </div>
+    <div id="downloadArea">
         <a id="downloadLink" href="#" download="otomad_output.wav">WAV形式でダウンロード</a>
     </div>
 </div>
@@ -198,21 +163,15 @@
 <script>
     let originalAudioBuffer = null;
     let midiData = null;
-    let finalRenderedBuffer = null;
-    let finalPlayer = null;
 
     const audioUpload = document.getElementById('audioUpload');
     const midiUpload = document.getElementById('midiUpload');
     const trimStart = document.getElementById('trimStart');
     const trimEnd = document.getElementById('trimEnd');
-    const effectStartInput = document.getElementById('effectStart');
     const previewBtn = document.getElementById('previewBtn');
     const generateBtn = document.getElementById('generateBtn');
     const statusDiv = document.getElementById('status');
-    
-    const resultArea = document.getElementById('resultArea');
-    const playResultBtn = document.getElementById('playResultBtn');
-    const stopResultBtn = document.getElementById('stopResultBtn');
+    const downloadArea = document.getElementById('downloadArea');
     const downloadLink = document.getElementById('downloadLink');
 
     audioUpload.addEventListener('change', async (e) => {
@@ -276,112 +235,59 @@
     generateBtn.addEventListener('click', async () => {
         statusDiv.textContent = '生成中... しばらくお待ちください。';
         generateBtn.disabled = true;
-        resultArea.style.display = 'none';
+        downloadArea.style.display = 'none';
 
         try {
             let maxDuration = 0;
-            let noteCount = 0;
             midiData.tracks.forEach(track => {
                 track.notes.forEach(note => {
-                    noteCount++;
                     const noteEnd = note.time + note.duration;
                     if (noteEnd > maxDuration) maxDuration = noteEnd;
                 });
             });
 
-            if (noteCount === 0) {
-                throw new Error("MIDIファイルに音符が含まれていません。");
-            }
-
             const renderDuration = maxDuration + 2.0; 
             const slicedBuffer = getSlicedBuffer();
-            const effectStart = parseFloat(effectStartInput.value);
 
-            // エラーの原因だった非同期処理を取り除き、同期的にレンダリングを実行
-            finalRenderedBuffer = await Tone.Offline(({ transport }) => {
-                const dryGain = new Tone.Gain(1).toDestination();
-                const wetGain = new Tone.Gain(0);
-                
-                // エフェクト群（非同期のReverbを同期型のFreeverbに変更）
-                const dist = new Tone.Distortion(0.6);
-                const eq = new Tone.EQ3({ low: 8, mid: 0, high: 5 });
-                const reverb = new Tone.Freeverb({ roomSize: 0.8, dampening: 2000 });
-                
-                wetGain.chain(eq, dist, reverb, Tone.Destination);
-
-                // 音声データはブラウザネイティブのAudioBufferを直接渡す
+            // Tone.Offlineを使って安全にバックグラウンドレンダリングを行う
+            const renderedBuffer = await Tone.Offline(({ transport }) => {
                 const sampler = new Tone.Sampler({
                     urls: {
-                        "C4": slicedBuffer.get()
+                        "C4": slicedBuffer
                     }
-                });
-                sampler.connect(dryGain);
-                sampler.connect(wetGain);
-
-                dryGain.gain.setValueAtTime(1, 0);
-                dryGain.gain.setValueAtTime(0, effectStart);
-                
-                wetGain.gain.setValueAtTime(0, 0);
-                wetGain.gain.setValueAtTime(1, effectStart);
+                }).toDestination();
 
                 midiData.tracks.forEach(track => {
                     track.notes.forEach(note => {
                         sampler.triggerAttackRelease(
                             note.name, 
                             note.duration, 
-                            note.time || 0, 
+                            note.time, 
                             note.velocity
                         );
                     });
                 });
             }, renderDuration);
             
-            const wavData = audioBufferToWav(finalRenderedBuffer);
+            // WAV変換処理
+            const wavData = audioBufferToWav(renderedBuffer);
             const blob = new Blob([new DataView(wavData)], { type: 'audio/wav' });
             const url = URL.createObjectURL(blob);
             
             downloadLink.href = url;
-            resultArea.style.display = 'block';
-            statusDiv.textContent = '生成が完了しました！下部のボタンからプレビューやダウンロードが可能です。';
+            downloadArea.style.display = 'block';
+            statusDiv.textContent = '生成が完了しました。';
 
         } catch (err) {
-            statusDiv.textContent = 'エラーが発生しました: ' + err.message;
+            statusDiv.textContent = '生成中にエラーが発生しました: ' + err.message;
             console.error(err);
         } finally {
             generateBtn.disabled = false;
         }
     });
 
-    playResultBtn.addEventListener('click', async () => {
-        if (!finalRenderedBuffer) return;
-        await Tone.start();
-
-        if (finalPlayer) {
-            finalPlayer.stop();
-            finalPlayer.dispose();
-        }
-
-        finalPlayer = new Tone.Player(finalRenderedBuffer).toDestination();
-        finalPlayer.start();
-        
-        playResultBtn.disabled = true;
-        stopResultBtn.disabled = false;
-
-        finalPlayer.onstop = () => {
-            playResultBtn.disabled = false;
-            stopResultBtn.disabled = true;
-        };
-    });
-
-    stopResultBtn.addEventListener('click', () => {
-        if (finalPlayer) {
-            finalPlayer.stop();
-        }
-        playResultBtn.disabled = false;
-        stopResultBtn.disabled = true;
-    });
-
     function audioBufferToWav(toneBuffer) {
+        // ToneAudioBufferかネイティブのAudioBufferかを判定して安全に取得
         const buffer = toneBuffer.get ? toneBuffer.get() : toneBuffer;
         const numChannels = buffer.numberOfChannels;
         const sampleRate = buffer.sampleRate;
