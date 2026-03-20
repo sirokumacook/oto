@@ -3,289 +3,351 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>音MADジェネレーター Pro</title>
-    <script src="https://unpkg.com/@tonejs/midi"></script>
+    <title>音MADジェネレーター</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tonejs/midi"></script>
     <style>
-        body { font-family: 'Segoe UI', Meiryo, sans-serif; background-color: #f4f4f9; color: #333; padding: 20px; line-height: 1.6; }
-        .container { max-width: 650px; margin: 0 auto; background: #fff; padding: 30px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
-        h1 { font-size: 24px; border-bottom: 2px solid #5c6bc0; padding-bottom: 10px; }
-        .control-group { margin-bottom: 20px; background: #fafafa; padding: 15px; border-radius: 6px; border: 1px solid #eee; }
-        label { display: block; font-weight: bold; margin-bottom: 5px; color: #3f51b5; }
-        input[type="file"], input[type="number"] { width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
-        .flex-row { display: flex; gap: 10px; }
-        .flex-row > div { flex: 1; }
-        .button-group { display: flex; gap: 10px; margin-top: 20px; }
-        button { flex: 1; padding: 12px; font-size: 16px; font-weight: bold; color: #fff; border: none; border-radius: 4px; cursor: pointer; transition: background-color 0.2s; }
-        
-        #generate-btn { background-color: #ff9800; }
-        #generate-btn:disabled { background-color: #ffcc80; cursor: not-allowed; }
-        #generate-btn:hover:not(:disabled) { background-color: #e68a00; }
-
-        #play-btn { background-color: #4caf50; }
-        #play-btn:disabled { background-color: #a5d6a7; cursor: not-allowed; }
-        #play-btn:hover:not(:disabled) { background-color: #45a049; }
-        
-        #stop-btn { background-color: #f44336; }
-        #stop-btn:disabled { background-color: #ef9a9a; cursor: not-allowed; }
-        #stop-btn:hover:not(:disabled) { background-color: #da190b; }
-
-        #download-btn { background-color: #2196f3; }
-        #download-btn:disabled { background-color: #90caf9; cursor: not-allowed; }
-        #download-btn:hover:not(:disabled) { background-color: #1e88e5; }
-        
-        .note { font-size: 0.85em; color: #666; margin-top: 5px; }
-        #status { text-align: center; font-weight: bold; margin-top: 15px; color: #e91e63; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #1e1e1e;
+            color: #ffffff;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+        }
+        .container {
+            background-color: #2d2d2d;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+            max-width: 600px;
+            width: 100%;
+        }
+        h1 {
+            text-align: center;
+            border-bottom: 2px solid #007acc;
+            padding-bottom: 10px;
+            margin-top: 0;
+        }
+        .section {
+            margin-bottom: 25px;
+            padding: 15px;
+            background-color: #3d3d3d;
+            border-radius: 6px;
+        }
+        .section h2 {
+            margin-top: 0;
+            font-size: 1.2em;
+            color: #4daafc;
+        }
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-size: 0.9em;
+        }
+        input[type="file"] {
+            display: block;
+            margin-bottom: 10px;
+            width: 100%;
+        }
+        .input-group {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 10px;
+        }
+        .input-group div {
+            flex: 1;
+        }
+        input[type="number"] {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #555;
+            border-radius: 4px;
+            background-color: #1e1e1e;
+            color: #fff;
+            box-sizing: border-box;
+        }
+        button {
+            background-color: #007acc;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 1em;
+            width: 100%;
+            transition: background-color 0.2s;
+        }
+        button:hover {
+            background-color: #005f9e;
+        }
+        button:disabled {
+            background-color: #555;
+            cursor: not-allowed;
+        }
+        .preview-btn {
+            background-color: #28a745;
+            margin-bottom: 10px;
+        }
+        .preview-btn:hover {
+            background-color: #218838;
+        }
+        #status {
+            margin-top: 15px;
+            text-align: center;
+            font-weight: bold;
+            color: #ffcc00;
+        }
+        #downloadArea {
+            margin-top: 20px;
+            display: none;
+        }
+        #downloadArea a {
+            display: block;
+            text-align: center;
+            background-color: #e51400;
+            color: white;
+            padding: 12px;
+            text-decoration: none;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+        #downloadArea a:hover {
+            background-color: #b30f00;
+        }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <h1>音MADジェネレーター Pro</h1>
-    
-    <div class="control-group">
-        <label for="audio-file">1. 素材音声 (WAV / MP3など)</label>
-        <input type="file" id="audio-file" accept="audio/*">
+    <h1>音MADジェネレーター</h1>
+
+    <div class="section">
+        <h2>1. 音声のアップロードと切り抜き</h2>
+        <label>素材となる音声ファイル (MP3 / WAV)</label>
+        <input type="file" id="audioUpload" accept="audio/mp3, audio/wav, audio/mpeg">
         
-        <div class="flex-row" style="margin-top: 10px;">
+        <div class="input-group">
             <div>
-                <label for="trim-start" style="font-size: 0.9em;">開始時間 (秒)</label>
-                <input type="number" id="trim-start" value="0" step="0.01" min="0">
+                <label>開始時間 (秒)</label>
+                <input type="number" id="trimStart" value="0" min="0" step="0.01">
             </div>
             <div>
-                <label for="trim-end" style="font-size: 0.9em;">終了時間 (秒)</label>
-                <input type="number" id="trim-end" value="1" step="0.01" min="0.01">
+                <label>終了時間 (秒)</label>
+                <input type="number" id="trimEnd" value="1" min="0.01" step="0.01">
             </div>
         </div>
-        <div class="note">※音声の使いたい部分だけを切り抜けます。先頭の無音をカットするとタイミングが合います。</div>
+        <p style="font-size: 0.8em; color: #bbb;">※元の音の高さは「C4 (ド)」として扱われます。</p>
+        <button class="preview-btn" id="previewBtn" disabled>切り抜いた音声をプレビュー</button>
     </div>
 
-    <div class="control-group">
-        <label for="midi-file">2. 楽譜ファイル (MIDI)</label>
-        <input type="file" id="midi-file" accept=".mid,.midi">
+    <div class="section">
+        <h2>2. MIDIのアップロード</h2>
+        <label>メロディとなるMIDIファイル</label>
+        <input type="file" id="midiUpload" accept=".mid, .midi">
     </div>
 
-    <div class="control-group">
-        <label for="base-note">3. 素材の基準音程 (MIDIノート番号)</label>
-        <input type="number" id="base-note" value="60">
-        <div class="note">※60=C4(ド)。切り抜いた音声の元の高さに合わせてください。合わない場合は数値を上下させて調整します。</div>
+    <div class="section">
+        <h2>3. 生成</h2>
+        <button id="generateBtn" disabled>音声を生成する</button>
+        <div id="status"></div>
     </div>
 
-    <button id="generate-btn" disabled>⚙️ 結合して生成する</button>
-    <div id="status">ファイルを選択してください</div>
-
-    <div class="button-group">
-        <button id="play-btn" disabled>▶ 再生</button>
-        <button id="stop-btn" disabled>■ 停止</button>
-        <button id="download-btn" disabled>⬇ ダウンロード(WAV)</button>
+    <div id="downloadArea">
+        <a id="downloadLink" href="#" download="otomad_output.wav">WAV形式でダウンロード</a>
     </div>
 </div>
 
 <script>
-    let audioContext = new (window.AudioContext || window.webkitAudioContext)();
-    let originalAudioBuffer;
-    let midiData;
-    let renderedBuffer; // 生成済みの音声データ
-    let currentSource = null;
+    let originalAudioBuffer = null;
+    let midiData = null;
 
-    const audioInput = document.getElementById('audio-file');
-    const midiInput = document.getElementById('midi-file');
-    const trimStartInput = document.getElementById('trim-start');
-    const trimEndInput = document.getElementById('trim-end');
-    const baseNoteInput = document.getElementById('base-note');
-    
-    const generateBtn = document.getElementById('generate-btn');
-    const playBtn = document.getElementById('play-btn');
-    const stopBtn = document.getElementById('stop-btn');
-    const downloadBtn = document.getElementById('download-btn');
-    const statusText = document.getElementById('status');
+    const audioUpload = document.getElementById('audioUpload');
+    const midiUpload = document.getElementById('midiUpload');
+    const trimStart = document.getElementById('trimStart');
+    const trimEnd = document.getElementById('trimEnd');
+    const previewBtn = document.getElementById('previewBtn');
+    const generateBtn = document.getElementById('generateBtn');
+    const statusDiv = document.getElementById('status');
+    const downloadArea = document.getElementById('downloadArea');
+    const downloadLink = document.getElementById('downloadLink');
 
-    // WAV読み込み
-    audioInput.addEventListener('change', async (e) => {
+    // 音声ファイルの読み込み
+    audioUpload.addEventListener('change', async (e) => {
         const file = e.target.files[0];
         if (!file) return;
+
+        statusDiv.textContent = '音声を読み込んでいます...';
         const arrayBuffer = await file.arrayBuffer();
-        originalAudioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-        trimEndInput.value = originalAudioBuffer.duration.toFixed(2);
-        checkReady();
+        const audioContext = Tone.getContext().rawContext;
+        
+        try {
+            const decodedBuffer = await audioContext.decodeAudioData(arrayBuffer);
+            originalAudioBuffer = new Tone.ToneAudioBuffer(decodedBuffer);
+            trimEnd.value = originalAudioBuffer.duration.toFixed(2);
+            statusDiv.textContent = '音声の読み込みが完了しました。';
+            checkReady();
+        } catch (err) {
+            statusDiv.textContent = '音声の読み込みに失敗しました。';
+            console.error(err);
+        }
     });
 
-    // MIDI読み込み
-    midiInput.addEventListener('change', async (e) => {
+    // MIDIファイルの読み込み
+    midiUpload.addEventListener('change', async (e) => {
         const file = e.target.files[0];
         if (!file) return;
-        const arrayBuffer = await file.arrayBuffer();
-        midiData = new Midi(arrayBuffer);
-        checkReady();
+
+        statusDiv.textContent = 'MIDIを読み込んでいます...';
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            try {
+                midiData = new Midi(e.target.result);
+                statusDiv.textContent = 'MIDIの読み込みが完了しました。';
+                checkReady();
+            } catch (err) {
+                statusDiv.textContent = 'MIDIの解析に失敗しました。';
+                console.error(err);
+            }
+        };
+        reader.readAsArrayBuffer(file);
     });
 
     function checkReady() {
-        if (originalAudioBuffer && midiData) {
-            generateBtn.disabled = false;
-            statusText.textContent = "準備完了！「生成する」を押してください。";
-        }
+        previewBtn.disabled = !originalAudioBuffer;
+        generateBtn.disabled = !(originalAudioBuffer && midiData);
     }
 
-    // ★ 音声生成（レンダリング）処理
+    // 切り抜いた音声の取得（内部用）
+    function getSlicedBuffer() {
+        const start = parseFloat(trimStart.value);
+        let end = parseFloat(trimEnd.value);
+        if (start >= end) end = start + 0.1;
+        return originalAudioBuffer.slice(start, end);
+    }
+
+    // プレビュー再生
+    previewBtn.addEventListener('click', async () => {
+        await Tone.start();
+        const sliced = getSlicedBuffer();
+        const player = new Tone.Player(sliced).toDestination();
+        player.start();
+    });
+
+    // 音声の生成処理
     generateBtn.addEventListener('click', async () => {
+        statusDiv.textContent = '生成中... しばらくお待ちください。';
         generateBtn.disabled = true;
-        statusText.textContent = "⏳ 生成中...";
-        
+        downloadArea.style.display = 'none';
+
         try {
-            const track = midiData.tracks.find(t => t.notes.length > 0);
-            if (!track) throw new Error("MIDIに音符がありません。");
+            // MIDIの全体の長さを計算
+            let maxDuration = 0;
+            midiData.tracks.forEach(track => {
+                track.notes.forEach(note => {
+                    const noteEnd = note.time + note.duration;
+                    if (noteEnd > maxDuration) maxDuration = noteEnd;
+                });
+            });
 
-            // MIDIの最後の音符の終了時間を取得
-            const lastNote = track.notes[track.notes.length - 1];
-            const totalDuration = lastNote.time + lastNote.duration + 2.0; // 余韻のために2秒追加
+            // 少し余裕を持たせる
+            const renderDuration = maxDuration + 2.0; 
 
-            // バックグラウンドで音声を構築するコンテキスト
-            const offlineCtx = new OfflineAudioContext(2, 44100 * totalDuration, 44100);
-            const baseNote = parseInt(baseNoteInput.value, 10);
-            const trimStart = parseFloat(trimStartInput.value);
-            const trimEnd = parseFloat(trimEndInput.value);
-            const sampleDuration = Math.max(0.01, trimEnd - trimStart);
-
-            // 切り抜いた部分だけのバッファを作成（メモリ効率とタイミング安定のため）
-            const slicedBuffer = offlineCtx.createBuffer(
-                originalAudioBuffer.numberOfChannels,
-                sampleDuration * originalAudioBuffer.sampleRate,
-                originalAudioBuffer.sampleRate
-            );
-            for (let i = 0; i < originalAudioBuffer.numberOfChannels; i++) {
-                const channelData = originalAudioBuffer.getChannelData(i);
-                const slicedData = slicedBuffer.getChannelData(i);
-                const startOffset = Math.floor(trimStart * originalAudioBuffer.sampleRate);
-                for (let j = 0; j < slicedData.length; j++) {
-                    slicedData[j] = channelData[startOffset + j] || 0;
+            // オフラインレンダリング（バックグラウンドでの音声合成）
+            const offlineContext = new Tone.OfflineContext(2, renderDuration, 44100);
+            
+            // サンプラーの設定 (切り抜いた音をC4として扱う)
+            const slicedBuffer = getSlicedBuffer();
+            const sampler = new Tone.Sampler({
+                urls: {
+                    "C4": slicedBuffer
                 }
-            }
+            }).connect(offlineContext.destination);
 
-            // MIDIの音符に合わせて配置
-            track.notes.forEach(note => {
-                const source = offlineCtx.createBufferSource();
-                source.buffer = slicedBuffer;
-                
-                // ピッチ変更 (再生速度)
-                const pitchRatio = Math.pow(2, (note.midi - baseNote) / 12);
-                source.playbackRate.value = pitchRatio;
-                
-                const gainNode = offlineCtx.createGain();
-                const noteStart = note.time;
-                const actualDuration = note.duration;
+            // サンプラーの読み込み待機
+            await Tone.loaded();
 
-                // プツ音防止のエンベロープ
-                gainNode.gain.setValueAtTime(0, noteStart);
-                gainNode.gain.linearRampToValueAtTime(1, noteStart + 0.01);
-                
-                const releaseTime = Math.min(0.05, actualDuration / 2);
-                gainNode.gain.setValueAtTime(1, noteStart + actualDuration - releaseTime);
-                gainNode.gain.linearRampToValueAtTime(0, noteStart + actualDuration);
-                
-                source.connect(gainNode);
-                gainNode.connect(offlineCtx.destination);
-                
-                source.start(noteStart);
-                // 再生速度が変わるため、元の音声長さに合わせて停止時間を計算
-                const stopTime = noteStart + (sampleDuration / pitchRatio);
-                source.stop(Math.min(stopTime, noteStart + actualDuration + 0.1));
+            // MIDIノートの配置
+            midiData.tracks.forEach(track => {
+                track.notes.forEach(note => {
+                    sampler.triggerAttackRelease(
+                        note.name, 
+                        note.duration, 
+                        note.time, 
+                        note.velocity
+                    );
+                });
             });
 
             // レンダリング実行
-            renderedBuffer = await offlineCtx.startRendering();
+            const renderedBuffer = await offlineContext.render();
             
-            statusText.textContent = "✅ 生成完了！再生・ダウンロードが可能です。";
-            statusText.style.color = "#4caf50";
-            playBtn.disabled = false;
-            downloadBtn.disabled = false;
+            // WAVに変換してダウンロードリンクを作成
+            const wavData = audioBufferToWav(renderedBuffer);
+            const blob = new Blob([new DataView(wavData)], { type: 'audio/wav' });
+            const url = URL.createObjectURL(blob);
+            
+            downloadLink.href = url;
+            downloadArea.style.display = 'block';
+            statusDiv.textContent = '生成が完了しました！';
 
-        } catch (error) {
-            statusText.textContent = "❌ エラーが発生しました: " + error.message;
-            statusText.style.color = "#f44336";
+        } catch (err) {
+            statusDiv.textContent = '生成中にエラーが発生しました。';
+            console.error(err);
         } finally {
             generateBtn.disabled = false;
         }
     });
 
-    // 再生処理（レンダリング済みのバッファを再生）
-    playBtn.addEventListener('click', () => {
-        if (!renderedBuffer) return;
-        if (audioContext.state === 'suspended') audioContext.resume();
-        
-        stopAudio();
-        
-        currentSource = audioContext.createBufferSource();
-        currentSource.buffer = renderedBuffer;
-        currentSource.connect(audioContext.destination);
-        currentSource.start(0);
-        
-        stopBtn.disabled = false;
-        
-        currentSource.onended = () => {
-            stopBtn.disabled = true;
-        };
-    });
-
-    // 停止処理
-    stopBtn.addEventListener('click', stopAudio);
-
-    function stopAudio() {
-        if (currentSource) {
-            try { currentSource.stop(); } catch (e) {}
-            currentSource = null;
-        }
-        stopBtn.disabled = true;
-    }
-
-    // ★ WAVダウンロード処理
-    downloadBtn.addEventListener('click', () => {
-        if (!renderedBuffer) return;
-        
-        const wavBlob = audioBufferToWav(renderedBuffer);
-        const url = URL.createObjectURL(wavBlob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'oto_mad_track.wav';
-        a.click();
-        URL.revokeObjectURL(url);
-    });
-
-    // AudioBufferをWAV形式に変換する関数
+    // AudioBufferをWAV形式のArrayBufferに変換する関数
     function audioBufferToWav(buffer) {
-        let numOfChan = buffer.numberOfChannels,
-            length = buffer.length * numOfChan * 2 + 44,
-            bufferArray = new ArrayBuffer(length),
-            view = new DataView(bufferArray),
-            channels = [], i, sample, offset = 0, pos = 0;
-
-        function setUint16(data) { view.setUint16(pos, data, true); pos += 2; }
-        function setUint32(data) { view.setUint32(pos, data, true); pos += 4; }
-
-        setUint32(0x46464952); // "RIFF"
-        setUint32(length - 8);
-        setUint32(0x45564157); // "WAVE"
-        setUint32(0x20746d66); // "fmt " chunk
-        setUint32(16);
-        setUint16(1);
-        setUint16(numOfChan);
-        setUint32(buffer.sampleRate);
-        setUint32(buffer.sampleRate * 2 * numOfChan);
-        setUint16(numOfChan * 2);
-        setUint16(16);
-        setUint32(0x61746164); // "data" chunk
-        setUint32(length - pos - 4);
-
-        for(i = 0; i < buffer.numberOfChannels; i++) channels.push(buffer.getChannelData(i));
-
-        while(pos < length) {
-            for(i = 0; i < numOfChan; i++) {
-                sample = Math.max(-1, Math.min(1, channels[i][offset]));
-                sample = (0.5 + sample < 0 ? sample * 32768 : sample * 32767)|0;
-                view.setInt16(pos, sample, true);
-                pos += 2;
+        const numChannels = buffer.numberOfChannels;
+        const sampleRate = buffer.sampleRate;
+        const format = 1; // PCM
+        const bitDepth = 16;
+        
+        const result = new Float32Array(buffer.length * numChannels);
+        for (let channel = 0; channel < numChannels; channel++) {
+            const channelData = buffer.getChannelData(channel);
+            for (let i = 0; i < buffer.length; i++) {
+                result[i * numChannels + channel] = channelData[i];
             }
-            offset++;
         }
-        return new Blob([bufferArray], {type: "audio/wav"});
+
+        const dataLength = result.length * (bitDepth / 8);
+        const bufferLength = 44 + dataLength;
+        const arrayBuffer = new ArrayBuffer(bufferLength);
+        const view = new DataView(arrayBuffer);
+
+        const writeString = (view, offset, string) => {
+            for (let i = 0; i < string.length; i++) {
+                view.setUint8(offset + i, string.charCodeAt(i));
+            }
+        };
+
+        writeString(view, 0, 'RIFF');
+        view.setUint32(4, 36 + dataLength, true);
+        writeString(view, 8, 'WAVE');
+        writeString(view, 12, 'fmt ');
+        view.setUint32(16, 16, true);
+        view.setUint16(20, format, true);
+        view.setUint16(22, numChannels, true);
+        view.setUint32(24, sampleRate, true);
+        view.setUint32(28, sampleRate * numChannels * (bitDepth / 8), true);
+        view.setUint16(32, numChannels * (bitDepth / 8), true);
+        view.setUint16(34, bitDepth, true);
+        writeString(view, 36, 'data');
+        view.setUint32(40, dataLength, true);
+
+        let offset = 44;
+        for (let i = 0; i < result.length; i++) {
+            const sample = Math.max(-1, Math.min(1, result[i]));
+            view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7FFF, true);
+            offset += 2;
+        }
+
+        return arrayBuffer;
     }
 </script>
 
