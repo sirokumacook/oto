@@ -257,25 +257,30 @@
             const slicedBuffer = getSlicedBuffer();
             const baseNote = baseNoteSelect.value;
 
-            const renderedBuffer = await Tone.Offline(({ transport }) => {
-                // 音圧を上げるコンプレッサーを設定
+            // 非同期関数としてOfflineを実行し、ロードを待機する
+            const renderedBuffer = await Tone.Offline(async () => {
                 const comp = new Tone.Compressor(-15, 4);
                 
-                // サンプラーの設定（音の立ち上がりと切れ際を鋭くする）
+                // slicedBuffer.get() でネイティブのAudioBufferを渡し、エラーを防ぐ
                 const sampler = new Tone.Sampler({
                     urls: {
-                        [baseNote]: slicedBuffer
+                        [baseNote]: slicedBuffer.get()
                     },
                     attack: 0.01,
-                    release: 0.05 // ここを短くすることで音が濁らずハッキリする
-                }).chain(comp, Tone.Destination);
+                    release: 0.05
+                });
+                
+                sampler.chain(comp, Tone.Destination);
+
+                // サンプラーの準備が完全に整うまで待機する
+                await Tone.loaded();
 
                 midiData.tracks.forEach(track => {
                     track.notes.forEach(note => {
                         sampler.triggerAttackRelease(
                             note.name, 
                             note.duration, 
-                            note.time, 
+                            note.time || 0, 
                             note.velocity
                         );
                     });
@@ -288,7 +293,7 @@
             
             downloadLink.href = url;
             downloadArea.style.display = 'block';
-            statusDiv.textContent = '生成が完了しました。音が重ならずハッキリ聞こえるようになっています。';
+            statusDiv.textContent = '生成が完了しました。';
 
         } catch (err) {
             statusDiv.textContent = '生成中にエラーが発生しました: ' + err.message;
