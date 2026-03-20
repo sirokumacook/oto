@@ -46,10 +46,16 @@
             margin-bottom: 8px;
             font-size: 0.9em;
         }
-        input[type="file"] {
+        input[type="file"], select {
             display: block;
             margin-bottom: 10px;
             width: 100%;
+            padding: 8px;
+            background-color: #1e1e1e;
+            color: #fff;
+            border: 1px solid #555;
+            border-radius: 4px;
+            box-sizing: border-box;
         }
         .input-group {
             display: flex;
@@ -58,15 +64,6 @@
         }
         .input-group div {
             flex: 1;
-        }
-        input[type="number"] {
-            width: 100%;
-            padding: 8px;
-            border: 1px solid #555;
-            border-radius: 4px;
-            background-color: #1e1e1e;
-            color: #fff;
-            box-sizing: border-box;
         }
         button {
             background-color: #007acc;
@@ -139,7 +136,16 @@
                 <input type="number" id="trimEnd" value="1" min="0.01" step="0.01">
             </div>
         </div>
-        <p style="font-size: 0.8em; color: #bbb;">※元の音の高さは「C4 (ド)」として扱われます。</p>
+        
+        <label>切り抜いた音声の元の高さ（基準音）</label>
+        <select id="baseNote">
+            <option value="C3">C3 (低いド / 男性ボーカル等)</option>
+            <option value="C4" selected>C4 (真ん中のド / 標準)</option>
+            <option value="C5">C5 (高いド / 女性ボーカル等)</option>
+            <option value="G3">G3 (ソ)</option>
+            <option value="G4">G4 (高いソ)</option>
+        </select>
+        
         <button class="preview-btn" id="previewBtn" disabled>切り抜いた音声をプレビュー</button>
     </div>
 
@@ -168,6 +174,7 @@
     const midiUpload = document.getElementById('midiUpload');
     const trimStart = document.getElementById('trimStart');
     const trimEnd = document.getElementById('trimEnd');
+    const baseNoteSelect = document.getElementById('baseNote');
     const previewBtn = document.getElementById('previewBtn');
     const generateBtn = document.getElementById('generateBtn');
     const statusDiv = document.getElementById('status');
@@ -248,14 +255,20 @@
 
             const renderDuration = maxDuration + 2.0; 
             const slicedBuffer = getSlicedBuffer();
+            const baseNote = baseNoteSelect.value;
 
-            // Tone.Offlineを使って安全にバックグラウンドレンダリングを行う
             const renderedBuffer = await Tone.Offline(({ transport }) => {
+                // 音圧を上げるコンプレッサーを設定
+                const comp = new Tone.Compressor(-15, 4);
+                
+                // サンプラーの設定（音の立ち上がりと切れ際を鋭くする）
                 const sampler = new Tone.Sampler({
                     urls: {
-                        "C4": slicedBuffer
-                    }
-                }).toDestination();
+                        [baseNote]: slicedBuffer
+                    },
+                    attack: 0.01,
+                    release: 0.05 // ここを短くすることで音が濁らずハッキリする
+                }).chain(comp, Tone.Destination);
 
                 midiData.tracks.forEach(track => {
                     track.notes.forEach(note => {
@@ -269,14 +282,13 @@
                 });
             }, renderDuration);
             
-            // WAV変換処理
             const wavData = audioBufferToWav(renderedBuffer);
             const blob = new Blob([new DataView(wavData)], { type: 'audio/wav' });
             const url = URL.createObjectURL(blob);
             
             downloadLink.href = url;
             downloadArea.style.display = 'block';
-            statusDiv.textContent = '生成が完了しました。';
+            statusDiv.textContent = '生成が完了しました。音が重ならずハッキリ聞こえるようになっています。';
 
         } catch (err) {
             statusDiv.textContent = '生成中にエラーが発生しました: ' + err.message;
@@ -287,7 +299,6 @@
     });
 
     function audioBufferToWav(toneBuffer) {
-        // ToneAudioBufferかネイティブのAudioBufferかを判定して安全に取得
         const buffer = toneBuffer.get ? toneBuffer.get() : toneBuffer;
         const numChannels = buffer.numberOfChannels;
         const sampleRate = buffer.sampleRate;
