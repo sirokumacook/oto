@@ -253,23 +253,52 @@
     });
 
     generateBtn.addEventListener('click', async () => {
-        statusDiv.textContent = '生成中... 処理に数秒かかります。';
+        statusDiv.textContent = '生成中... 処理に時間がかかっています。しばらくお待ちください。';
         generateBtn.disabled = true;
         downloadArea.style.display = 'none';
 
+        // UIのテキスト更新を確実に画面に反映させるための待機処理
+        await new Promise(resolve => setTimeout(resolve, 100));
+
         try {
             let maxDuration = 0;
-            let noteCount = 0;
+            let validNotes = [];
+
+            // MIDIから有効な音符だけを抽出し、壊れたデータを排除する
             midiData.tracks.forEach(track => {
                 track.notes.forEach(note => {
-                    noteCount++;
-                    const noteEnd = note.time + note.duration;
-                    if (noteEnd > maxDuration) maxDuration = noteEnd;
+                    const time = parseFloat(note.time) || 0;
+                    const duration = parseFloat(note.duration) || 0.1;
+                    
+                    if (time >= 0 && duration > 0) {
+                        validNotes.push({
+                            time: time,
+                            duration: duration,
+                            midi: note.midi,
+                            velocity: note.velocity || 1
+                        });
+                        const noteEnd = time + duration;
+                        if (noteEnd > maxDuration) {
+                            maxDuration = noteEnd;
+                        }
+                    }
                 });
             });
 
-            if (noteCount === 0) {
-                throw new Error("MIDIファイルに音符が含まれていません。");
+            if (validNotes.length === 0) {
+                throw new Error("MIDIファイルに有効な音符が含まれていません。");
+            }
+
+            // 【フリーズ対策1】曲の長さが5分(300秒)を超える場合は強制カット
+            const MAX_SECONDS = 300;
+            if (maxDuration > MAX_SECONDS) {
+                maxDuration = MAX_SECONDS;
+            }
+
+            // 【フリーズ対策2】音符の数が多すぎる場合は制限する
+            const MAX_NOTES = 15000;
+            if (validNotes.length > MAX_NOTES) {
+                validNotes = validNotes.slice(0, MAX_NOTES);
             }
 
             const renderDuration = maxDuration + 2.0; 
@@ -277,47 +306,36 @@
             const pitchShift = parseInt(pitchShiftInput.value) || 0;
             const slicedBuffer = getSlicedBuffer();
 
-            const tempWavArrayBuffer = audioBufferToWav(slicedBuffer);
-            const tempBlob = new Blob([new DataView(tempWavArrayBuffer)], { type: 'audio/wav' });
-            const tempWavUrl = URL.createObjectURL(tempBlob);
-
-            const renderedBuffer = await Tone.Offline(async () => {
+            const renderedBuffer = await Tone.Offline(({ transport }) => {
                 const comp = new Tone.Compressor(-15, 4).toDestination();
                 
+                // ネイティブのAudioBufferを直接渡し、ロード待機処理を省いて安全に接続
                 const sampler = new Tone.Sampler({
                     urls: {
-                        [baseNote]: tempWavUrl
+                        [baseNote]: slicedBuffer.get()
                     },
                     attack: 0.01,
                     release: 0.05
                 }).connect(comp);
 
-                await Tone.loaded();
+                validNotes.forEach(note => {
+                    if (note.time > maxDuration) return; // 制限時間を超えた音は配置しない
 
-                midiData.tracks.forEach(track => {
-                    track.notes.forEach(note => {
-                        // MIDIのノート番号にピッチシフトの値を足す
-                        let shiftedMidi = note.midi + pitchShift;
-                        
-                        // MIDI規格の範囲内に収める (0〜127)
-                        if (shiftedMidi < 0) shiftedMidi = 0;
-                        if (shiftedMidi > 127) shiftedMidi = 127;
-                        
-                        // シフトしたノート番号を "C4" などの音階名に変換
-                        const shiftedNoteName = Tone.Frequency(shiftedMidi, "midi").toNote();
+                    let shiftedMidi = note.midi + pitchShift;
+                    if (shiftedMidi < 0) shiftedMidi = 0;
+                    if (shiftedMidi > 127) shiftedMidi = 127;
+                    
+                    const shiftedNoteName = Tone.Frequency(shiftedMidi, "midi").toNote();
 
-                        sampler.triggerAttackRelease(
-                            shiftedNoteName, 
-                            note.duration, 
-                            note.time || 0, 
-                            note.velocity
-                        );
-                    });
+                    sampler.triggerAttackRelease(
+                        shiftedNoteName, 
+                        note.duration, 
+                        note.time, 
+                        note.velocity
+                    );
                 });
             }, renderDuration);
             
-            URL.revokeObjectURL(tempWavUrl);
-
             const finalWavData = audioBufferToWav(renderedBuffer);
             const blob = new Blob([new DataView(finalWavData)], { type: 'audio/wav' });
             const finalUrl = URL.createObjectURL(blob);
