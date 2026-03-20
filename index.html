@@ -100,7 +100,6 @@
             background-color: #333;
             border-radius: 4px;
         }
-        /* プログレスバーのスタイル */
         #progressContainer {
             width: 100%;
             background-color: #1e1e1e;
@@ -206,7 +205,6 @@
     let originalAudioBuffer = null;
     let midiData = null;
     let previewPlayer = null;
-    let renderInterval = null;
 
     const audioUpload = document.getElementById('audioUpload');
     const midiUpload = document.getElementById('midiUpload');
@@ -297,9 +295,8 @@
         progressContainer.style.display = 'block';
         progressText.style.display = 'block';
         updateProgress(0);
-        statusDiv.textContent = '生成準備中...';
-
-        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        let renderInterval = null;
 
         try {
             let maxDuration = 0;
@@ -309,7 +306,6 @@
                 track.notes.forEach(note => {
                     const time = parseFloat(note.time) || 0;
                     const duration = parseFloat(note.duration) || 0.1;
-                    
                     if (time >= 0 && duration > 0) {
                         validNotes.push({
                             time: time,
@@ -317,106 +313,92 @@
                             midi: note.midi,
                             velocity: note.velocity || 1
                         });
-                        const noteEnd = time + duration;
-                        if (noteEnd > maxDuration) {
-                            maxDuration = noteEnd;
+                        if (time + duration > maxDuration) {
+                            maxDuration = time + duration;
                         }
                     }
                 });
             });
 
-            if (validNotes.length === 0) {
-                throw new Error("MIDIファイルに有効な音符が含まれていません。");
-            }
+            if (validNotes.length === 0) throw new Error("MIDIファイルに有効な音符が含まれていません。");
 
             const MAX_SECONDS = 300;
-            if (maxDuration > MAX_SECONDS) {
-                maxDuration = MAX_SECONDS;
-            }
+            if (maxDuration > MAX_SECONDS) maxDuration = MAX_SECONDS;
 
             const MAX_NOTES = 15000;
-            if (validNotes.length > MAX_NOTES) {
-                validNotes = validNotes.slice(0, MAX_NOTES);
-            }
+            if (validNotes.length > MAX_NOTES) validNotes = validNotes.slice(0, MAX_NOTES);
 
             const renderDuration = maxDuration + 2.0; 
             const baseNote = baseNoteSelect.value;
             const pitchShift = parseInt(pitchShiftInput.value) || 0;
             const slicedBuffer = getSlicedBuffer();
-
             const totalNotes = validNotes.length;
             let scheduledNotes = 0;
 
-            statusDiv.textContent = '手順1/2: 音符を配置しています...';
+            statusDiv.textContent = '手順1/3: データを準備しています...';
 
             const renderedBuffer = await Tone.Offline(async () => {
                 const comp = new Tone.Compressor(-15, 4).toDestination();
-                
                 const sampler = new Tone.Sampler({
-                    urls: {
-                        [baseNote]: slicedBuffer.get()
-                    },
+                    urls: { [baseNote]: slicedBuffer.get() },
                     attack: 0.01,
                     release: 0.05
                 }).connect(comp);
 
                 await Tone.loaded();
 
-                // 音符を少しずつ配置してUIをフリーズさせない処理
+                // 画面をフリーズさせないための分割配置処理
                 const chunk = 500;
                 for (let i = 0; i < totalNotes; i += chunk) {
                     const notesChunk = validNotes.slice(i, i + chunk);
-                    
                     notesChunk.forEach(note => {
                         if (note.time > maxDuration) return;
-
                         let shiftedMidi = note.midi + pitchShift;
-                        if (shiftedMidi < 0) shiftedMidi = 0;
-                        if (shiftedMidi > 127) shiftedMidi = 127;
-                        
+                        shiftedMidi = Math.max(0, Math.min(127, shiftedMidi));
                         const shiftedNoteName = Tone.Frequency(shiftedMidi, "midi").toNote();
-
-                        sampler.triggerAttackRelease(
-                            shiftedNoteName, 
-                            note.duration, 
-                            note.time, 
-                            note.velocity
-                        );
+                        sampler.triggerAttackRelease(shiftedNoteName, note.duration, note.time, note.velocity);
                     });
 
                     scheduledNotes += notesChunk.length;
-                    const percent = Math.floor((scheduledNotes / totalNotes) * 50); // 配置完了で50%
-                    updateProgress(percent);
-
-                    // 画面のプログレスバーを更新するための待機時間
-                    await new Promise(resolve => setTimeout(resolve, 10));
+                    updateProgress(Math.floor((scheduledNotes / totalNotes) * 30));
+                    await new Promise(resolve => setTimeout(resolve, 5));
                 }
 
-                statusDiv.textContent = '手順2/2: 音声を書き出しています...';
-
-                // 書き出し中のパーセンテージ進行（50%から99%まで徐々に進む）
-                renderInterval = setInterval(() => {
-                    let current = parseFloat(progressBar.style.width) || 50;
-                    const remaining = 99 - current;
-                    current += remaining * 0.05;
-                    updateProgress(Math.floor(current));
-                }, 200);
-
+                // ここから実際のレンダリングが裏側で走る
             }, renderDuration);
-            
-            clearInterval(renderInterval);
-            updateProgress(100);
 
-            const finalWavData = audioBufferToWav(renderedBuffer);
+            // 擬似的なプログレス（Offlineレンダリング中）
+            statusDiv.textContent = '手順2/3: 音声を合成しています（時間がかかります）...';
+            renderInterval = setInterval(() => {
+                let current = parseFloat(progressBar.style.width) || 30;
+                const remaining = 70 - current;
+                current += remaining * 0.05;
+                updateProgress(Math.floor(current));
+            }, 500);
+
+            // レンダリング終了待機
+            await new Promise(resolve => setTimeout(resolve, 100));
+            clearInterval(renderInterval);
+
+            // ここが80%フリーズの原因だった箇所。非同期処理に変更。
+            statusDiv.textContent = '手順3/3: WAVファイルに変換しています...';
+            updateProgress(70);
+
+            const finalWavData = await audioBufferToWavAsync(renderedBuffer, (progress) => {
+                const percent = 70 + Math.floor(progress * 30);
+                updateProgress(percent);
+            });
+
+            updateProgress(100);
             const blob = new Blob([new DataView(finalWavData)], { type: 'audio/wav' });
             const finalUrl = URL.createObjectURL(blob);
             
             downloadLink.href = finalUrl;
             downloadArea.style.display = 'block';
-            statusDiv.textContent = '生成が完了しました。下のボタンから保存してください。';
+            statusDiv.textContent = '生成が完了しました！下のボタンから保存してください。';
 
         } catch (err) {
-            clearInterval(renderInterval);
+            if (renderInterval) clearInterval(renderInterval);
             statusDiv.textContent = '生成中にエラーが発生しました: ' + err.message;
             console.error(err);
         } finally {
@@ -424,54 +406,73 @@
         }
     });
 
-    function audioBufferToWav(toneBuffer) {
-        const buffer = toneBuffer.get ? toneBuffer.get() : toneBuffer;
-        const numChannels = buffer.numberOfChannels;
-        const sampleRate = buffer.sampleRate;
-        const format = 1; 
-        const bitDepth = 16;
-        
-        const result = new Float32Array(buffer.length * numChannels);
-        for (let channel = 0; channel < numChannels; channel++) {
-            const channelData = buffer.getChannelData(channel);
-            for (let i = 0; i < buffer.length; i++) {
-                result[i * numChannels + channel] = channelData[i];
+    // メインスレッドをブロックしない非同期WAV変換関数
+    function audioBufferToWavAsync(toneBuffer, progressCallback) {
+        return new Promise((resolve) => {
+            const buffer = toneBuffer.get ? toneBuffer.get() : toneBuffer;
+            const numChannels = buffer.numberOfChannels;
+            const sampleRate = buffer.sampleRate;
+            const format = 1; 
+            const bitDepth = 16;
+            const length = buffer.length;
+
+            const dataLength = length * numChannels * (bitDepth / 8);
+            const bufferLength = 44 + dataLength;
+            const arrayBuffer = new ArrayBuffer(bufferLength);
+            const view = new DataView(arrayBuffer);
+
+            const writeString = (view, offset, string) => {
+                for (let i = 0; i < string.length; i++) {
+                    view.setUint8(offset + i, string.charCodeAt(i));
+                }
+            };
+
+            writeString(view, 0, 'RIFF');
+            view.setUint32(4, 36 + dataLength, true);
+            writeString(view, 8, 'WAVE');
+            writeString(view, 12, 'fmt ');
+            view.setUint32(16, 16, true);
+            view.setUint16(20, format, true);
+            view.setUint16(22, numChannels, true);
+            view.setUint32(24, sampleRate, true);
+            view.setUint32(28, sampleRate * numChannels * (bitDepth / 8), true);
+            view.setUint16(32, numChannels * (bitDepth / 8), true);
+            view.setUint16(34, bitDepth, true);
+            writeString(view, 36, 'data');
+            view.setUint32(40, dataLength, true);
+
+            const channelData = [];
+            for (let i = 0; i < numChannels; i++) {
+                channelData.push(buffer.getChannelData(i));
             }
-        }
 
-        const dataLength = result.length * (bitDepth / 8);
-        const bufferLength = 44 + dataLength;
-        const arrayBuffer = new ArrayBuffer(bufferLength);
-        const view = new DataView(arrayBuffer);
+            let offset = 44;
+            let i = 0;
+            // 約0.5秒分のデータを1ブロックとして処理し、画面をフリーズさせない
+            const chunkSize = Math.floor(sampleRate / 2);
 
-        const writeString = (view, offset, string) => {
-            for (let i = 0; i < string.length; i++) {
-                view.setUint8(offset + i, string.charCodeAt(i));
+            function processChunk() {
+                const end = Math.min(i + chunkSize, length);
+                for (; i < end; i++) {
+                    for (let channel = 0; channel < numChannels; channel++) {
+                        let sample = channelData[channel][i];
+                        sample = Math.max(-1, Math.min(1, sample));
+                        view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7FFF, true);
+                        offset += 2;
+                    }
+                }
+
+                if (i < length) {
+                    if (progressCallback) progressCallback(i / length);
+                    // 処理を一時中断してブラウザに描画の隙間を与える
+                    setTimeout(processChunk, 5);
+                } else {
+                    resolve(arrayBuffer);
+                }
             }
-        };
 
-        writeString(view, 0, 'RIFF');
-        view.setUint32(4, 36 + dataLength, true);
-        writeString(view, 8, 'WAVE');
-        writeString(view, 12, 'fmt ');
-        view.setUint32(16, 16, true);
-        view.setUint16(20, format, true);
-        view.setUint16(22, numChannels, true);
-        view.setUint32(24, sampleRate, true);
-        view.setUint32(28, sampleRate * numChannels * (bitDepth / 8), true);
-        view.setUint16(32, numChannels * (bitDepth / 8), true);
-        view.setUint16(34, bitDepth, true);
-        writeString(view, 36, 'data');
-        view.setUint32(40, dataLength, true);
-
-        let offset = 44;
-        for (let i = 0; i < result.length; i++) {
-            const sample = Math.max(-1, Math.min(1, result[i]));
-            view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7FFF, true);
-            offset += 2;
-        }
-
-        return arrayBuffer;
+            processChunk();
+        });
     }
 </script>
 
