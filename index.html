@@ -96,6 +96,9 @@
             font-weight: bold;
             color: #ffcc00;
             word-break: break-all;
+            padding: 10px;
+            background-color: #333;
+            border-radius: 4px;
         }
         #downloadArea {
             margin-top: 20px;
@@ -158,7 +161,7 @@
     <div class="section">
         <h2>3. 生成</h2>
         <button id="generateBtn" disabled>音声を生成する</button>
-        <div id="status"></div>
+        <div id="status">待機中</div>
     </div>
 
     <div id="downloadArea">
@@ -169,6 +172,7 @@
 <script>
     let originalAudioBuffer = null;
     let midiData = null;
+    let previewPlayer = null;
 
     const audioUpload = document.getElementById('audioUpload');
     const midiUpload = document.getElementById('midiUpload');
@@ -234,45 +238,57 @@
 
     previewBtn.addEventListener('click', async () => {
         await Tone.start();
+        if (previewPlayer) {
+            previewPlayer.stop();
+            previewPlayer.dispose();
+        }
         const sliced = getSlicedBuffer();
-        const player = new Tone.Player(sliced).toDestination();
-        player.start();
+        previewPlayer = new Tone.Player(sliced).toDestination();
+        previewPlayer.start();
     });
 
     generateBtn.addEventListener('click', async () => {
-        statusDiv.textContent = '生成中... しばらくお待ちください。';
+        statusDiv.textContent = '生成中... 処理に数秒かかります。';
         generateBtn.disabled = true;
         downloadArea.style.display = 'none';
 
         try {
             let maxDuration = 0;
+            let noteCount = 0;
             midiData.tracks.forEach(track => {
                 track.notes.forEach(note => {
+                    noteCount++;
                     const noteEnd = note.time + note.duration;
                     if (noteEnd > maxDuration) maxDuration = noteEnd;
                 });
             });
 
-            const renderDuration = maxDuration + 2.0; 
-            const slicedBuffer = getSlicedBuffer();
-            const baseNote = baseNoteSelect.value;
+            if (noteCount === 0) {
+                throw new Error("MIDIファイルに音符が含まれていません。");
+            }
 
-            // 非同期関数としてOfflineを実行し、ロードを待機する
+            const renderDuration = maxDuration + 2.0; 
+            const baseNote = baseNoteSelect.value;
+            const slicedBuffer = getSlicedBuffer();
+
+            // エラー回避策：切り抜いた音声を一度仮のWAVデータ(Blob)に変換し、安全なURLを発行する
+            const tempWavArrayBuffer = audioBufferToWav(slicedBuffer);
+            const tempBlob = new Blob([new DataView(tempWavArrayBuffer)], { type: 'audio/wav' });
+            const tempWavUrl = URL.createObjectURL(tempBlob);
+
+            // 安全なWAV URLを使ってバックグラウンドレンダリングを実行
             const renderedBuffer = await Tone.Offline(async () => {
-                const comp = new Tone.Compressor(-15, 4);
+                const comp = new Tone.Compressor(-15, 4).toDestination();
                 
-                // slicedBuffer.get() でネイティブのAudioBufferを渡し、エラーを防ぐ
                 const sampler = new Tone.Sampler({
                     urls: {
-                        [baseNote]: slicedBuffer.get()
+                        [baseNote]: tempWavUrl
                     },
                     attack: 0.01,
                     release: 0.05
-                });
-                
-                sampler.chain(comp, Tone.Destination);
+                }).connect(comp);
 
-                // サンプラーの準備が完全に整うまで待機する
+                // 発行したWAVファイルがサンプラーに読み込まれるのを待つ
                 await Tone.loaded();
 
                 midiData.tracks.forEach(track => {
@@ -287,13 +303,17 @@
                 });
             }, renderDuration);
             
-            const wavData = audioBufferToWav(renderedBuffer);
-            const blob = new Blob([new DataView(wavData)], { type: 'audio/wav' });
-            const url = URL.createObjectURL(blob);
+            // 使用し終わった仮のURLを破棄
+            URL.revokeObjectURL(tempWavUrl);
+
+            // 最終的な音声をWAVとしてダウンロードできるようにする
+            const finalWavData = audioBufferToWav(renderedBuffer);
+            const blob = new Blob([new DataView(finalWavData)], { type: 'audio/wav' });
+            const finalUrl = URL.createObjectURL(blob);
             
-            downloadLink.href = url;
+            downloadLink.href = finalUrl;
             downloadArea.style.display = 'block';
-            statusDiv.textContent = '生成が完了しました。';
+            statusDiv.textContent = '生成が完了しました。下のボタンから保存してください。';
 
         } catch (err) {
             statusDiv.textContent = '生成中にエラーが発生しました: ' + err.message;
@@ -303,6 +323,7 @@
         }
     });
 
+    // AudioBufferをWAVデータに変換する関数
     function audioBufferToWav(toneBuffer) {
         const buffer = toneBuffer.get ? toneBuffer.get() : toneBuffer;
         const numChannels = buffer.numberOfChannels;
