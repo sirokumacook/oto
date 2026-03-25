@@ -7,95 +7,312 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tonejs/midi"></script>
     <style>
-        body { font-family: sans-serif; padding: 20px; background-color: #f0f0f0; }
-        .container { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); max-width: 600px; margin: auto; }
-        .section { margin-bottom: 20px; padding-bottom: 20px; border-bottom: 1px solid #ccc; }
-        button { padding: 10px 15px; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; }
-        button:hover { background-color: #0056b3; }
-        input[type="file"] { margin-bottom: 10px; }
+        body { font-family: sans-serif; background-color: #f4f4f9; padding: 20px; color: #333; }
+        .container { background: white; padding: 25px; border-radius: 10px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); max-width: 800px; margin: auto; }
+        .section { margin-bottom: 20px; padding-bottom: 20px; border-bottom: 1px solid #eee; }
+        h2, h3 { color: #2c3e50; margin-top: 0; }
+        button { padding: 10px 15px; margin: 5px 5px 5px 0; background-color: #3498db; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; }
+        button:hover { background-color: #2980b9; }
+        button:disabled { background-color: #bdc3c7; cursor: not-allowed; }
+        .stop-btn { background-color: #e74c3c; }
+        .stop-btn:hover { background-color: #c0392b; }
+        .download-btn { background-color: #2ecc71; }
+        .download-btn:hover { background-color: #27ae60; }
+        canvas { background-color: #000; display: block; margin-top: 10px; max-width: 100%; border-radius: 5px; }
+        .log-box { background:#222; color:#0f0; padding:10px; font-family:monospace; height:120px; overflow-y:auto; border-radius: 5px; font-size: 14px;}
+        input[type="file"], input[type="number"] { margin-bottom: 10px; display: block; }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <h2>Web 音MADジェネレーター (開発ベース)</h2>
+    <h2>Web 音MADジェネレーター</h2>
 
     <div class="section">
-        <h3>1. ファイルのアップロード</h3>
-        <label>MIDIファイル: <input type="file" id="midiInput" accept=".mid,.midi"></label><br>
-        <label>素材音声 (MP3): <input type="file" id="audioInput" accept="audio/mpeg"></label><br>
-        <label>素材動画 (MP4): <input type="file" id="videoInput" accept="video/mp4"></label>
+        <h3>📂 1. 素材の読み込み</h3>
+        <label>🎹 MIDIファイル:<input type="file" id="midiInput" accept=".mid,.midi"></label>
+        <label>🎵 音声ファイル (MP3/WAV):<input type="file" id="audioInput" accept="audio/*"></label>
+        <label>🎬 映像ファイル (MP4等):<input type="file" id="videoInput" accept="video/*"></label>
+        <label>基準の音程 (MIDIノート番号, C4=60): <input type="number" id="baseNote" value="60"></label>
+        <button id="loadBtn">素材をシステムに読み込む</button>
     </div>
 
     <div class="section">
-        <h3>2. プレビュー / 実行</h3>
-        <button id="btnFeature4">④ MIDIに合わせて音声を鳴らす（音程そのまま）</button>
-        <p><small>※まずは一番実装がシンプルな④のテスト用ボタンです。</small></p>
+        <h3>▶️ 2. 再生・プレビュー (自動で録画されます)</h3>
+        <button id="btn1" disabled>① 音程を変えて再生 (音MAD風)</button>
+        <button id="btn2" disabled>② 映像エフェクト (反転等)</button>
+        <button id="btn3" disabled>③ MIDIをシンセBGMとして再生</button>
+        <button id="btn4" disabled>④ そのままの音程で連打再生</button>
+        <br>
+        <button id="stopBtn" class="stop-btn" disabled>⏹ 停止 / 録画終了</button>
     </div>
 
     <div class="section">
-        <h3>出力コンソール</h3>
-        <div id="log" style="background:#333; color:#0f0; padding:10px; font-family:monospace; height:100px; overflow-y:scroll;">
-            準備完了...
-        </div>
+        <h3>📺 映像プレビュー ＆ 💾 ダウンロード</h3>
+        <canvas id="previewCanvas" width="640" height="360"></canvas>
+        <video id="sourceVideo" style="display:none;" loop muted></video>
+        <br>
+        <button id="downloadBtn" class="download-btn" style="display:none;">⬇️ 録画した動画(WebM)をダウンロード</button>
+    </div>
+
+    <div class="section">
+        <h3>💻 コンソールログ</h3>
+        <div id="log" class="log-box"></div>
     </div>
 </div>
 
 <script>
-    // ログ出力用関数
-    function logMessage(msg) {
-        const logDiv = document.getElementById('log');
-        logDiv.innerHTML += `<div>> ${msg}</div>`;
-        logDiv.scrollTop = logDiv.scrollHeight;
-    }
+    const logDiv = document.getElementById('log');
+    function logMessage(msg) { logDiv.innerHTML += `<div>> ${msg}</div>`; logDiv.scrollTop = logDiv.scrollHeight; }
 
-    document.getElementById('btnFeature4').addEventListener('click', async () => {
+    // グローバル変数
+    let parsedMidi = null;
+    let audioBuffer = null;
+    let synths = [];
+    let scheduledEvents = [];
+    
+    // 録画用変数
+    let mediaRecorder;
+    let recordedChunks = [];
+    let isRecording = false;
+
+    const canvas = document.getElementById('previewCanvas');
+    const ctx = canvas.getContext('2d');
+    const sourceVideo = document.getElementById('sourceVideo');
+
+    // UI要素
+    const loadBtn = document.getElementById('loadBtn');
+    const btn1 = document.getElementById('btn1');
+    const btn2 = document.getElementById('btn2');
+    const btn3 = document.getElementById('btn3');
+    const btn4 = document.getElementById('btn4');
+    const stopBtn = document.getElementById('stopBtn');
+    const downloadBtn = document.getElementById('downloadBtn');
+
+    // --- 素材の読み込み ---
+    loadBtn.addEventListener('click', async () => {
         const midiFile = document.getElementById('midiInput').files[0];
         const audioFile = document.getElementById('audioInput').files[0];
+        const videoFile = document.getElementById('videoInput').files[0];
 
-        if (!midiFile || !audioFile) {
-            alert('MIDIファイルと音声ファイルの両方をアップロードしてください。');
-            return;
-        }
+        if (!midiFile) { alert('MIDIファイルは必須です！'); return; }
 
-        logMessage('処理を開始します...');
+        logMessage('ロード開始...');
+        await Tone.start(); // ユーザーのアクション直後にAudioContextを開始
 
         try {
-            // ブラウザのオーディオエンジンを開始
-            await Tone.start();
-            logMessage('オーディオエンジン起動');
+            // MIDIの解析
+            const midiArrayBuffer = await midiFile.arrayBuffer();
+            parsedMidi = new Midi(midiArrayBuffer);
+            logMessage(`✅ MIDI読み込み完了 (${parsedMidi.tracks.length} トラック)`);
 
-            // 1. MP3ファイルをTone.Playerに読み込む
-            const audioUrl = URL.createObjectURL(audioFile);
-            const player = new Tone.Player(audioUrl).toDestination();
-            await Tone.loaded();
-            logMessage('音声素材の読み込み完了');
+            // 音声の読み込み (Tone.ToneAudioBufferを使用)
+            if (audioFile) {
+                const audioUrl = URL.createObjectURL(audioFile);
+                audioBuffer = new Tone.ToneAudioBuffer(audioUrl, () => {
+                    logMessage('✅ 音声素材の読み込み完了');
+                });
+            }
 
-            // 2. MIDIファイルを解析する
-            const arrayBuffer = await midiFile.arrayBuffer();
-            const midi = new Midi(arrayBuffer);
-            logMessage(`MIDI読み込み完了: ${midi.tracks.length} トラック見つかりました`);
+            // 動画の読み込み
+            if (videoFile) {
+                const videoUrl = URL.createObjectURL(videoFile);
+                sourceVideo.src = videoUrl;
+                sourceVideo.play(); // 非表示の動画を裏で再生開始
+                logMessage('✅ 映像素材の読み込み完了');
+            }
 
-            // 3. MIDIのノート（音符）に合わせて音声を再生する
-            const now = Tone.now() + 0.5; // 少し余裕を持たせて再生開始
-            
-            // 最初のトラック（メロディラインを想定）の音符を取得
-            midi.tracks[0].notes.forEach(note => {
-                // note.time (再生タイミング)に合わせて、音声を再生（音程はそのまま）
-                Tone.Draw.schedule(() => {
-                    player.start();
-                    // 必要に応じて長さを調整： player.start(0, 0, note.duration);
-                }, now + note.time);
-            });
+            // ボタンを有効化
+            if (audioFile) { btn1.disabled = false; btn4.disabled = false; }
+            if (videoFile) { btn2.disabled = false; }
+            btn3.disabled = false;
 
-            logMessage('再生をスケジュールしました！');
-
-        } catch (error) {
-            console.error(error);
-            logMessage('エラーが発生しました: ' + error.message);
+        } catch (err) {
+            logMessage('❌ エラー: ' + err.message);
         }
     });
-</script>
 
+    // --- 録画のセットアップ ---
+    function startRecording() {
+        recordedChunks = [];
+        const audioDest = Tone.getContext().createMediaStreamDestination();
+        Tone.getDestination().connect(audioDest); // Tone.jsの出力を録音先に繋ぐ
+
+        const canvasStream = canvas.captureStream(30); // 30fpsでCanvasをキャプチャ
+        const audioStream = audioDest.stream;
+
+        // 映像と音声を合体
+        const combinedStream = new MediaStream([
+            ...canvasStream.getVideoTracks(),
+            ...audioStream.getAudioTracks()
+        ]);
+
+        // ブラウザの仕様上、MP4ではなくWebMになります
+        mediaRecorder = new MediaRecorder(combinedStream, { mimeType: 'video/webm' });
+        
+        mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) recordedChunks.push(e.data); };
+        mediaRecorder.onstop = () => {
+            const blob = new Blob(recordedChunks, { type: 'video/webm' });
+            const url = URL.createObjectURL(blob);
+            downloadBtn.onclick = () => {
+                const a = document.createElement('a');
+                a.style.display = 'none';
+                a.href = url;
+                a.download = 'otomad_output.webm';
+                document.body.appendChild(a);
+                a.click();
+                URL.revokeObjectURL(url);
+            };
+            downloadBtn.style.display = 'inline-block';
+            logMessage('✅ 録画が完了しました。ダウンロード可能です。');
+        };
+
+        mediaRecorder.start();
+        isRecording = true;
+        logMessage('⏺ 録画・録音を開始しました...');
+    }
+
+    // --- 再生の停止・リセット処理 ---
+    function stopAll() {
+        Tone.Transport.stop();
+        Tone.Transport.cancel(0); // スケジュールされたイベントを全消去
+        synths.forEach(s => s.dispose());
+        synths = [];
+        
+        if (isRecording && mediaRecorder.state !== "inactive") {
+            mediaRecorder.stop();
+            isRecording = false;
+        }
+
+        ctx.resetTransform();
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        
+        stopBtn.disabled = true;
+        logMessage('⏹ 停止しました。');
+    }
+    stopBtn.addEventListener('click', stopAll);
+
+    // --- 共通の再生準備 ---
+    async function preparePlayback() {
+        await Tone.start();
+        downloadBtn.style.display = 'none';
+        stopAll();
+        stopBtn.disabled = false;
+        startRecording();
+    }
+
+    // ==========================================
+    // ① MIDIに合わせて音声の音程を変える（音MAD風）
+    // ==========================================
+    btn1.addEventListener('click', async () => {
+        await preparePlayback();
+        const baseNote = parseInt(document.getElementById('baseNote').value);
+        logMessage('▶️ ① 音程変更再生を開始...');
+
+        const track = parsedMidi.tracks[0];
+        track.notes.forEach(note => {
+            Tone.Transport.schedule((time) => {
+                // 音声ソースを新しく作り、出力に繋ぐ
+                const source = new Tone.ToneBufferSource(audioBuffer).toDestination();
+                
+                // ピッチ変更の計算 (MIDIノートの差分から再生速度を計算)
+                // 例: baseNote(60) から note(62) になると、半音2つ分高いので再生速度が上がる
+                const pitchRatio = Math.pow(2, (note.midi - baseNote) / 12);
+                source.playbackRate.value = pitchRatio;
+                
+                source.start(time);
+            }, note.time);
+        });
+        Tone.Transport.start();
+    });
+
+    // ==========================================
+    // ② MIDIに合わせて映像エフェクト (反転等)
+    // ==========================================
+    btn2.addEventListener('click', async () => {
+        await preparePlayback();
+        logMessage('▶️ ② 映像エフェクト再生を開始...');
+        
+        let activeNotes = 0;
+
+        const track = parsedMidi.tracks[0];
+        track.notes.forEach(note => {
+            // ノートオン（音が鳴る瞬間）
+            Tone.Transport.schedule((time) => {
+                Tone.Draw.schedule(() => { activeNotes++; }, time);
+            }, note.time);
+            
+            // ノートオフ（音が消える瞬間）
+            Tone.Transport.schedule((time) => {
+                Tone.Draw.schedule(() => { activeNotes--; }, time + note.duration);
+            }, note.time + note.duration);
+        });
+
+        Tone.Transport.start();
+
+        // 映像描画ループ
+        function drawFrame() {
+            if (!isRecording) return; // 録画停止でループを抜ける
+            
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.save();
+
+            // 音が鳴っている数に応じてエフェクトを変える
+            if (activeNotes > 0) {
+                // 例: 左右反転エフェクト
+                ctx.translate(canvas.width, 0);
+                ctx.scale(-1, 1);
+                // ※ ここを工夫すれば「何個も並ぶ」なども可能です
+            }
+
+            if (sourceVideo.readyState >= 2) {
+                ctx.drawImage(sourceVideo, 0, 0, canvas.width, canvas.height);
+            }
+            ctx.restore();
+            requestAnimationFrame(drawFrame);
+        }
+        drawFrame();
+    });
+
+    // ==========================================
+    // ③ MIDIから音MADっぽいBGMを作成 (シンセ再生)
+    // ==========================================
+    btn3.addEventListener('click', async () => {
+        await preparePlayback();
+        logMessage('▶️ ③ BGM(シンセ)再生を開始...');
+
+        parsedMidi.tracks.forEach((track, index) => {
+            // トラックごとにシンセサイザーを用意
+            const synth = new Tone.PolySynth(Tone.Synth).toDestination();
+            synths.push(synth);
+
+            track.notes.forEach(note => {
+                Tone.Transport.schedule((time) => {
+                    synth.triggerAttackRelease(note.name, note.duration, time, note.velocity);
+                }, note.time);
+            });
+        });
+        Tone.Transport.start();
+    });
+
+    // ==========================================
+    // ④ MIDIに合わせてそのままの音程で連打再生
+    // ==========================================
+    btn4.addEventListener('click', async () => {
+        await preparePlayback();
+        logMessage('▶️ ④ 音程そのまま連打再生を開始...');
+
+        const track = parsedMidi.tracks[0];
+        track.notes.forEach(note => {
+            Tone.Transport.schedule((time) => {
+                const source = new Tone.ToneBufferSource(audioBuffer).toDestination();
+                source.start(time);
+                // 再生速度を変えないので、そのままの音声がMIDIのタイミングで鳴ります
+            }, note.time);
+        });
+        Tone.Transport.start();
+    });
+
+</script>
 </body>
 </html>
