@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>音MADジェネレーター (MP3出力・長時間モード搭載版)</title>
+    <title>音MADジェネレーター (オクターブ維持モード搭載版)</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tonejs/midi"></script>
     <style>
@@ -190,8 +190,10 @@
         
         <label style="margin-top: 15px; color: #4daafc; font-weight: bold;">合成モードを選択</label>
         <select id="synthMode">
-            <option value="continuous">長時間連続モード (長尺MP3をメロディに沿って変速)</option>
-            <option value="single">単音MADモード (短い音を切り抜いて何度も鳴らす)</option>
+            <option value="continuous">長時間連続モード (メロディ通りにそのまま変速)</option>
+            <option value="continuous_keep_octave" selected>長時間連続・オクターブ維持モード (声の高さを極力保つ)</option>
+            <option value="single">単音MADモード (メロディ通りにそのまま変速)</option>
+            <option value="single_keep_octave">単音MAD・オクターブ維持モード (声の高さを極力保つ)</option>
         </select>
     </div>
 
@@ -228,9 +230,12 @@
                 let processedNotes = 0;
                 let startTime = Date.now();
 
-                if (mode === 'continuous') {
+                // モードの判定
+                const isContinuous = mode.startsWith('continuous');
+                const keepOctave = mode.includes('keep_octave');
+
+                if (isContinuous) {
                     // 長時間MP3を連続で読み込みながらピッチを変更するモード
-                    // 和音（同時に鳴る音）を整理して単音のメロディラインにする
                     let monoNotes = [];
                     let currentEnd = 0;
                     validNotes.sort((a,b) => a.time - b.time);
@@ -250,14 +255,25 @@
                         const startSample = Math.floor(note.time * sampleRate);
                         const durationSamples = Math.floor(note.duration * sampleRate);
                         
-                        // 前の音符から今の音符までの空白時間は、音声を通常の速度で進める
                         if (startSample > lastNoteEndSample) {
                             srcPos += (startSample - lastNoteEndSample);
                         }
                         
                         let shiftedMidi = note.midi + pitchShift;
                         shiftedMidi = Math.max(0, Math.min(127, shiftedMidi));
-                        const semitoneDiff = shiftedMidi - baseMidi;
+                        let semitoneDiff = shiftedMidi - baseMidi;
+
+                        // ★ オクターブ維持の計算 ★
+                        if (keepOctave) {
+                            semitoneDiff = semitoneDiff % 12; // 12半音(1オクターブ)で割った余りを出す
+                            // 元の高さから -5 ～ +6 半音の範囲に収める
+                            if (semitoneDiff > 6) {
+                                semitoneDiff -= 12;
+                            } else if (semitoneDiff < -5) {
+                                semitoneDiff += 12;
+                            }
+                        }
+                        
                         const playbackRate = Math.pow(2, semitoneDiff / 12.0);
                         
                         let outIdx = startSample;
@@ -270,7 +286,6 @@
                             const valL = inL[idxFloor] * (1 - frac) + inL[idxFloor + 1] * frac;
                             const valR = inR ? (inR[idxFloor] * (1 - frac) + inR[idxFloor + 1] * frac) : valL;
                             
-                            // プツプツ音防止
                             let env = 1.0;
                             if (j < 441) env = j / 441;
                             else if (j > durationSamples - 441) env = (durationSamples - j) / 441;
@@ -296,7 +311,18 @@
                         const note = validNotes[i];
                         let shiftedMidi = note.midi + pitchShift;
                         shiftedMidi = Math.max(0, Math.min(127, shiftedMidi));
-                        const semitoneDiff = shiftedMidi - baseMidi;
+                        let semitoneDiff = shiftedMidi - baseMidi;
+
+                        // ★ オクターブ維持の計算 ★
+                        if (keepOctave) {
+                            semitoneDiff = semitoneDiff % 12;
+                            if (semitoneDiff > 6) {
+                                semitoneDiff -= 12;
+                            } else if (semitoneDiff < -5) {
+                                semitoneDiff += 12;
+                            }
+                        }
+
                         const playbackRate = Math.pow(2, semitoneDiff / 12.0);
 
                         const startSample = Math.floor(note.time * sampleRate);
@@ -346,7 +372,6 @@
 
                 const volumeBoost = maxAmp > 0 ? (0.95 / maxAmp) : 1;
                 
-                // Float32をInt16に変換
                 const int16L = new Int16Array(totalSamples);
                 const int16R = new Int16Array(totalSamples);
                 for (let i = 0; i < totalSamples; i++) {
@@ -358,7 +383,6 @@
                     int16R[i] = sR < 0 ? sR * 0x8000 : sR * 0x7FFF;
                 }
 
-                // lamejsでMP3にエンコード (192kbps)
                 const mp3encoder = new lamejs.Mp3Encoder(2, sampleRate, 192);
                 const mp3Data = [];
                 const sampleBlockSize = 1152; 
@@ -383,7 +407,6 @@
                     mp3Data.push(new Int8Array(mp3buf));
                 }
 
-                // 完成したMP3データをメイン画面に送信
                 self.postMessage({ type: 'done', mp3Data: mp3Data });
 
             } catch (error) {
@@ -507,7 +530,6 @@
 
             if (validNotes.length === 0) throw new Error("MIDIファイルに有効な音符が含まれていません。");
 
-            // 曲の長さを最大10分(600秒)に制限
             const MAX_SECONDS = 600;
             if (maxDuration > MAX_SECONDS) maxDuration = MAX_SECONDS;
             
@@ -532,7 +554,6 @@
                 const data = e.data;
 
                 if (data.type === 'progress') {
-                    // 合成処理を全体の80%とする
                     const percent = Math.floor((data.processed / data.total) * 80);
                     const elapsedSec = data.elapsed / 1000;
                     
@@ -554,7 +575,6 @@
                     progressBar.style.width = '100%';
                     progressText.textContent = '完了!';
                     
-                    // 送られてきたMP3配列からBlobを生成
                     const blob = new Blob(data.mp3Data, { type: 'audio/mp3' });
                     const finalUrl = URL.createObjectURL(blob);
                     
