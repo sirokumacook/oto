@@ -3,316 +3,532 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Web音MADジェネレーター</title>
+    <title>音MADジェネレーター (Web Worker搭載・完全フリーズ対策版)</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tonejs/midi"></script>
     <style>
-        body { font-family: sans-serif; background-color: #f4f4f9; padding: 20px; color: #333; }
-        .container { background: white; padding: 25px; border-radius: 10px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); max-width: 800px; margin: auto; }
-        .section { margin-bottom: 20px; padding-bottom: 20px; border-bottom: 1px solid #eee; }
-        h2, h3 { color: #2c3e50; margin-top: 0; }
-        button { padding: 10px 15px; margin: 5px 5px 5px 0; background-color: #3498db; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; }
-        button:hover { background-color: #2980b9; }
-        button:disabled { background-color: #bdc3c7; cursor: not-allowed; }
-        .stop-btn { background-color: #e74c3c; }
-        .stop-btn:hover { background-color: #c0392b; }
-        .download-btn { background-color: #2ecc71; }
-        .download-btn:hover { background-color: #27ae60; }
-        canvas { background-color: #000; display: block; margin-top: 10px; max-width: 100%; border-radius: 5px; }
-        .log-box { background:#222; color:#0f0; padding:10px; font-family:monospace; height:120px; overflow-y:auto; border-radius: 5px; font-size: 14px;}
-        input[type="file"], input[type="number"] { margin-bottom: 10px; display: block; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #1e1e1e;
+            color: #ffffff;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+        }
+        .container {
+            background-color: #2d2d2d;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+            max-width: 600px;
+            width: 100%;
+        }
+        h1 {
+            text-align: center;
+            border-bottom: 2px solid #007acc;
+            padding-bottom: 10px;
+            margin-top: 0;
+        }
+        .section {
+            margin-bottom: 25px;
+            padding: 15px;
+            background-color: #3d3d3d;
+            border-radius: 6px;
+        }
+        .section h2 {
+            margin-top: 0;
+            font-size: 1.2em;
+            color: #4daafc;
+        }
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-size: 0.9em;
+        }
+        input[type="file"], select, input[type="number"] {
+            display: block;
+            margin-bottom: 10px;
+            width: 100%;
+            padding: 8px;
+            background-color: #1e1e1e;
+            color: #fff;
+            border: 1px solid #555;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        .input-group {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 10px;
+        }
+        .input-group div {
+            flex: 1;
+        }
+        button {
+            background-color: #007acc;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 1em;
+            width: 100%;
+            transition: background-color 0.2s;
+        }
+        button:hover {
+            background-color: #005f9e;
+        }
+        button:disabled {
+            background-color: #555;
+            cursor: not-allowed;
+        }
+        .preview-btn {
+            background-color: #28a745;
+            margin-bottom: 10px;
+        }
+        .preview-btn:hover {
+            background-color: #218838;
+        }
+        #status {
+            margin-top: 15px;
+            text-align: center;
+            font-weight: bold;
+            color: #ffcc00;
+            word-break: break-all;
+            padding: 10px;
+            background-color: #333;
+            border-radius: 4px;
+        }
+        #progressContainer {
+            width: 100%;
+            background-color: #1e1e1e;
+            border: 1px solid #555;
+            border-radius: 4px;
+            margin-top: 15px;
+            height: 24px;
+            display: none;
+            position: relative;
+            overflow: hidden;
+        }
+        #progressBar {
+            width: 0%;
+            height: 100%;
+            background-color: #4daafc;
+            transition: width 0.1s linear;
+        }
+        #progressText {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.85em;
+            font-weight: bold;
+            color: #fff;
+            text-shadow: 1px 1px 2px #000;
+        }
+        #downloadArea {
+            margin-top: 20px;
+            display: none;
+        }
+        #downloadArea a {
+            display: block;
+            text-align: center;
+            background-color: #e51400;
+            color: white;
+            padding: 12px;
+            text-decoration: none;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+        #downloadArea a:hover {
+            background-color: #b30f00;
+        }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <h2>Web 音MADジェネレーター</h2>
+    <h1>音MADジェネレーター</h1>
 
     <div class="section">
-        <h3>📂 1. 素材の読み込み</h3>
-        <label>🎹 MIDIファイル:<input type="file" id="midiInput" accept=".mid,.midi"></label>
-        <label>🎵 音声ファイル (MP3/WAV):<input type="file" id="audioInput" accept="audio/*"></label>
-        <label>🎬 映像ファイル (MP4等):<input type="file" id="videoInput" accept="video/*"></label>
-        <label>基準の音程 (MIDIノート番号, C4=60): <input type="number" id="baseNote" value="60"></label>
-        <button id="loadBtn">素材をシステムに読み込む</button>
+        <h2>1. 音声のアップロードと切り抜き</h2>
+        <label>素材となる音声ファイル (MP3 / WAV)</label>
+        <input type="file" id="audioUpload" accept="audio/mp3, audio/wav, audio/mpeg">
+        
+        <div class="input-group">
+            <div>
+                <label>開始時間 (秒)</label>
+                <input type="number" id="trimStart" value="0" min="0" step="0.01">
+            </div>
+            <div>
+                <label>終了時間 (秒)</label>
+                <input type="number" id="trimEnd" value="1" min="0.01" step="0.01">
+            </div>
+        </div>
+        
+        <label>切り抜いた音声の元の高さ（基準音）</label>
+        <select id="baseNote">
+            <option value="48">C3 (低いド / 男性ボーカル等)</option>
+            <option value="60" selected>C4 (真ん中のド / 標準)</option>
+            <option value="72">C5 (高いド / 女性ボーカル等)</option>
+            <option value="55">G3 (ソ)</option>
+            <option value="67">G4 (高いソ)</option>
+        </select>
+        
+        <button class="preview-btn" id="previewBtn" disabled>切り抜いた音声をプレビュー</button>
     </div>
 
     <div class="section">
-        <h3>▶️ 2. 再生・プレビュー (自動で録画されます)</h3>
-        <button id="btn1" disabled>① 音程を変えて再生 (音MAD風)</button>
-        <button id="btn2" disabled>② 映像エフェクト (反転等)</button>
-        <button id="btn3" disabled>③ MIDIをシンセBGMとして再生</button>
-        <button id="btn4" disabled>④ そのままの音程で連打再生</button>
-        <br>
-        <button id="stopBtn" class="stop-btn" disabled>⏹ 停止 / 録画終了</button>
+        <h2>2. MIDIのアップロードと設定</h2>
+        <label>メロディとなるMIDIファイル</label>
+        <input type="file" id="midiUpload" accept=".mid, .midi">
+        
+        <label style="margin-top: 15px;">全体のピッチ調整 (半音単位)</label>
+        <input type="number" id="pitchShift" value="0" min="-24" max="24" step="1">
     </div>
 
     <div class="section">
-        <h3>📺 映像プレビュー ＆ 💾 ダウンロード</h3>
-        <canvas id="previewCanvas" width="640" height="360"></canvas>
-        <video id="sourceVideo" style="display:none;" loop muted></video>
-        <br>
-        <button id="downloadBtn" class="download-btn" style="display:none;">⬇️ 録画した動画(WebM)をダウンロード</button>
+        <h2>3. 生成</h2>
+        <button id="generateBtn" disabled>音声を生成する</button>
+        
+        <div id="progressContainer">
+            <div id="progressBar"></div>
+            <div id="progressText">0%</div>
+        </div>
+        <div id="status">待機中</div>
     </div>
 
-    <div class="section">
-        <h3>💻 コンソールログ</h3>
-        <div id="log" class="log-box"></div>
+    <div id="downloadArea">
+        <a id="downloadLink" href="#" download="otomad_output.wav">WAV形式でダウンロード</a>
     </div>
 </div>
 
 <script>
-    const logDiv = document.getElementById('log');
-    function logMessage(msg) { logDiv.innerHTML += `<div>> ${msg}</div>`; logDiv.scrollTop = logDiv.scrollHeight; }
+    // --- Web Workerのコード（裏側の独立したスレッドで動く処理） ---
+    const workerCode = `
+        self.onmessage = function(e) {
+            try {
+                const { inL, inR, validNotes, sampleRate, totalSamples, baseMidi, pitchShift } = e.data;
+                const outL = new Float32Array(totalSamples);
+                const outR = new Float32Array(totalSamples);
+                const sourceLength = inL.length;
+                const totalNotes = validNotes.length;
 
-    // グローバル変数
-    let parsedMidi = null;
-    let audioBuffer = null;
-    let synths = [];
-    let scheduledEvents = [];
-    
-    // 録画用変数
-    let mediaRecorder;
-    let recordedChunks = [];
-    let isRecording = false;
+                let processedNotes = 0;
+                let startTime = Date.now();
 
-    const canvas = document.getElementById('previewCanvas');
-    const ctx = canvas.getContext('2d');
-    const sourceVideo = document.getElementById('sourceVideo');
+                // 1. 音符の配置と波形の合成
+                for (let i = 0; i < totalNotes; i++) {
+                    const note = validNotes[i];
+                    let shiftedMidi = note.midi + pitchShift;
+                    shiftedMidi = Math.max(0, Math.min(127, shiftedMidi));
+                    const semitoneDiff = shiftedMidi - baseMidi;
+                    const playbackRate = Math.pow(2, semitoneDiff / 12.0);
 
-    // UI要素
-    const loadBtn = document.getElementById('loadBtn');
-    const btn1 = document.getElementById('btn1');
-    const btn2 = document.getElementById('btn2');
-    const btn3 = document.getElementById('btn3');
-    const btn4 = document.getElementById('btn4');
-    const stopBtn = document.getElementById('stopBtn');
-    const downloadBtn = document.getElementById('downloadBtn');
+                    const startSample = Math.floor(note.time * sampleRate);
+                    const durationSamples = Math.floor(note.duration * sampleRate);
+                    const attackSamples = Math.floor(0.01 * sampleRate);
+                    const releaseSamples = Math.floor(0.05 * sampleRate);
 
-    // --- 素材の読み込み ---
-    loadBtn.addEventListener('click', async () => {
-        const midiFile = document.getElementById('midiInput').files[0];
-        const audioFile = document.getElementById('audioInput').files[0];
-        const videoFile = document.getElementById('videoInput').files[0];
+                    let outIdx = startSample;
+                    let srcPos = 0;
 
-        if (!midiFile) { alert('MIDIファイルは必須です！'); return; }
+                    for (let j = 0; j < durationSamples + releaseSamples; j++) {
+                        if (outIdx >= totalSamples) break;
+                        if (srcPos >= sourceLength - 1) break;
 
-        logMessage('ロード開始...');
-        await Tone.start(); // ユーザーのアクション直後にAudioContextを開始
+                        const idxFloor = Math.floor(srcPos);
+                        const frac = srcPos - idxFloor;
+                        const valL = inL[idxFloor] * (1 - frac) + inL[idxFloor + 1] * frac;
+                        const valR = inR ? (inR[idxFloor] * (1 - frac) + inR[idxFloor + 1] * frac) : valL;
 
+                        let env = 1.0;
+                        if (j < attackSamples) env = j / attackSamples;
+                        else if (j > durationSamples) env = 1.0 - ((j - durationSamples) / releaseSamples);
+                        if (env < 0) env = 0;
+
+                        const vol = note.velocity * 0.5 * env;
+
+                        outL[outIdx] += valL * vol;
+                        outR[outIdx] += valR * vol;
+
+                        outIdx++;
+                        srcPos += playbackRate;
+                    }
+
+                    processedNotes++;
+                    
+                    // 定期的に進行状況をメイン画面に送信
+                    if (processedNotes % 100 === 0 || processedNotes === totalNotes) {
+                        self.postMessage({
+                            type: 'progress',
+                            processed: processedNotes,
+                            total: totalNotes,
+                            elapsed: Date.now() - startTime
+                        });
+                    }
+                }
+
+                // 2. 音量調整とWAVファイルへの変換
+                self.postMessage({ type: 'status', message: '音量調整・WAVファイル変換中...' });
+                
+                let maxAmp = 0;
+                for (let i = 0; i < totalSamples; i++) {
+                    const absL = Math.abs(outL[i]);
+                    const absR = Math.abs(outR[i]);
+                    if (absL > maxAmp) maxAmp = absL;
+                    if (absR > maxAmp) maxAmp = absR;
+                }
+
+                const volumeBoost = maxAmp > 0 ? (0.95 / maxAmp) : 1;
+                const numChannels = 2;
+                const bufferLength = 44 + totalSamples * numChannels * 2;
+                const wavBuffer = new ArrayBuffer(bufferLength);
+                const view = new DataView(wavBuffer);
+
+                const writeString = (view, offset, string) => {
+                    for (let i = 0; i < string.length; i++) {
+                        view.setUint8(offset + i, string.charCodeAt(i));
+                    }
+                };
+
+                writeString(view, 0, 'RIFF');
+                view.setUint32(4, 36 + totalSamples * numChannels * 2, true);
+                writeString(view, 8, 'WAVE');
+                writeString(view, 12, 'fmt ');
+                view.setUint32(16, 16, true);
+                view.setUint16(20, 1, true);
+                view.setUint16(22, numChannels, true);
+                view.setUint32(24, sampleRate, true);
+                view.setUint32(28, sampleRate * numChannels * 2, true);
+                view.setUint16(32, numChannels * 2, true);
+                view.setUint16(34, 16, true);
+                writeString(view, 36, 'data');
+                view.setUint32(40, totalSamples * numChannels * 2, true);
+
+                let offset = 44;
+                for (let i = 0; i < totalSamples; i++) {
+                    let sL = outL[i] * volumeBoost;
+                    let sR = outR[i] * volumeBoost;
+                    sL = Math.max(-1, Math.min(1, sL));
+                    sR = Math.max(-1, Math.min(1, sR));
+                    view.setInt16(offset, sL < 0 ? sL * 0x8000 : sL * 0x7FFF, true);
+                    offset += 2;
+                    view.setInt16(offset, sR < 0 ? sR * 0x8000 : sR * 0x7FFF, true);
+                    offset += 2;
+                }
+
+                // 完成したWAVデータをメイン画面に送信
+                self.postMessage({ type: 'done', wavBuffer: wavBuffer }, [wavBuffer]);
+
+            } catch (error) {
+                self.postMessage({ type: 'error', message: error.message });
+            }
+        };
+    `;
+
+    // 文字列からWeb Workerを生成
+    const blob = new Blob([workerCode], { type: 'application/javascript' });
+    const workerUrl = URL.createObjectURL(blob);
+    let renderWorker = null;
+
+    // --- メイン画面の処理 ---
+    let originalAudioBuffer = null;
+    let midiData = null;
+    let previewPlayer = null;
+
+    const audioUpload = document.getElementById('audioUpload');
+    const midiUpload = document.getElementById('midiUpload');
+    const trimStart = document.getElementById('trimStart');
+    const trimEnd = document.getElementById('trimEnd');
+    const baseNoteSelect = document.getElementById('baseNote');
+    const pitchShiftInput = document.getElementById('pitchShift');
+    const previewBtn = document.getElementById('previewBtn');
+    const generateBtn = document.getElementById('generateBtn');
+    const statusDiv = document.getElementById('status');
+    const progressContainer = document.getElementById('progressContainer');
+    const progressBar = document.getElementById('progressBar');
+    const progressText = document.getElementById('progressText');
+    const downloadArea = document.getElementById('downloadArea');
+    const downloadLink = document.getElementById('downloadLink');
+
+    audioUpload.addEventListener('change', async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        statusDiv.textContent = '音声を読み込んでいます...';
+        const arrayBuffer = await file.arrayBuffer();
+        const audioContext = Tone.getContext().rawContext;
         try {
-            // MIDIの解析
-            const midiArrayBuffer = await midiFile.arrayBuffer();
-            parsedMidi = new Midi(midiArrayBuffer);
-            logMessage(`✅ MIDI読み込み完了 (${parsedMidi.tracks.length} トラック)`);
+            const decodedBuffer = await audioContext.decodeAudioData(arrayBuffer);
+            originalAudioBuffer = new Tone.ToneAudioBuffer(decodedBuffer);
+            trimEnd.value = originalAudioBuffer.duration.toFixed(2);
+            statusDiv.textContent = '音声の読み込みが完了しました。';
+            checkReady();
+        } catch (err) {
+            statusDiv.textContent = '音声の読み込みに失敗しました。';
+            console.error(err);
+        }
+    });
 
-            // 音声の読み込み (Tone.ToneAudioBufferを使用)
-            if (audioFile) {
-                const audioUrl = URL.createObjectURL(audioFile);
-                audioBuffer = new Tone.ToneAudioBuffer(audioUrl, () => {
-                    logMessage('✅ 音声素材の読み込み完了');
+    midiUpload.addEventListener('change', async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        statusDiv.textContent = 'MIDIを読み込んでいます...';
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            try {
+                midiData = new Midi(e.target.result);
+                statusDiv.textContent = 'MIDIの読み込みが完了しました。';
+                checkReady();
+            } catch (err) {
+                statusDiv.textContent = 'MIDIの解析に失敗しました。';
+                console.error(err);
+            }
+        };
+        reader.readAsArrayBuffer(file);
+    });
+
+    function checkReady() {
+        previewBtn.disabled = !originalAudioBuffer;
+        generateBtn.disabled = !(originalAudioBuffer && midiData);
+    }
+
+    function getSlicedBuffer() {
+        const start = parseFloat(trimStart.value);
+        let end = parseFloat(trimEnd.value);
+        if (start >= end) end = start + 0.1;
+        return originalAudioBuffer.slice(start, end).get();
+    }
+
+    previewBtn.addEventListener('click', async () => {
+        await Tone.start();
+        if (previewPlayer) {
+            previewPlayer.stop();
+            previewPlayer.dispose();
+        }
+        const sliced = originalAudioBuffer.slice(parseFloat(trimStart.value), parseFloat(trimEnd.value));
+        previewPlayer = new Tone.Player(sliced).toDestination();
+        previewPlayer.start();
+    });
+
+    generateBtn.addEventListener('click', async () => {
+        generateBtn.disabled = true;
+        downloadArea.style.display = 'none';
+        progressContainer.style.display = 'block';
+        progressBar.style.width = '0%';
+        progressText.textContent = '準備中...';
+        
+        try {
+            let maxDuration = 0;
+            let validNotes = [];
+
+            // MIDIデータの解析
+            midiData.tracks.forEach(track => {
+                track.notes.forEach(note => {
+                    const time = parseFloat(note.time) || 0;
+                    const duration = parseFloat(note.duration) || 0.1;
+                    if (time >= 0 && duration > 0) {
+                        validNotes.push({
+                            time: time,
+                            duration: duration,
+                            midi: note.midi,
+                            velocity: note.velocity || 0.8
+                        });
+                        if (time + duration > maxDuration) {
+                            maxDuration = time + duration;
+                        }
+                    }
                 });
-            }
+            });
 
-            // 動画の読み込み
-            if (videoFile) {
-                const videoUrl = URL.createObjectURL(videoFile);
-                sourceVideo.src = videoUrl;
-                sourceVideo.play(); // 非表示の動画を裏で再生開始
-                logMessage('✅ 映像素材の読み込み完了');
-            }
+            if (validNotes.length === 0) throw new Error("MIDIファイルに有効な音符が含まれていません。");
 
-            // ボタンを有効化
-            if (audioFile) { btn1.disabled = false; btn4.disabled = false; }
-            if (videoFile) { btn2.disabled = false; }
-            btn3.disabled = false;
+            // 曲の長さを最大10分(600秒)に制限
+            const MAX_SECONDS = 600;
+            if (maxDuration > MAX_SECONDS) maxDuration = MAX_SECONDS;
+            
+            const renderDuration = maxDuration + 2.0;
+            const sampleRate = 44100;
+            const totalSamples = Math.ceil(renderDuration * sampleRate);
+            
+            const sourceBuffer = getSlicedBuffer();
+            const inL = sourceBuffer.getChannelData(0);
+            const inR = sourceBuffer.numberOfChannels > 1 ? sourceBuffer.getChannelData(1) : null;
+
+            const baseMidi = parseInt(baseNoteSelect.value);
+            const pitchShift = parseInt(pitchShiftInput.value) || 0;
+
+            statusDiv.textContent = 'バックグラウンドで処理を開始しました。';
+
+            // 既存のワーカーがあれば破棄して新しく作り直す
+            if (renderWorker) renderWorker.terminate();
+            renderWorker = new Worker(workerUrl);
+
+            // ワーカーからのメッセージ受信処理
+            renderWorker.onmessage = function(e) {
+                const data = e.data;
+
+                if (data.type === 'progress') {
+                    // 進行状況の計算 (合成処理を全体の90%とする)
+                    const percent = Math.floor((data.processed / data.total) * 90);
+                    const elapsedSec = data.elapsed / 1000;
+                    
+                    let remainingSec = 0;
+                    if (elapsedSec > 1 && data.processed > 0) {
+                        const rate = data.processed / elapsedSec;
+                        remainingSec = Math.max(0, Math.ceil((data.total - data.processed) / rate));
+                    }
+
+                    progressBar.style.width = percent + '%';
+                    progressText.textContent = percent + '% (残り約 ' + remainingSec + ' 秒)';
+                } 
+                else if (data.type === 'status') {
+                    statusDiv.textContent = data.message;
+                    progressBar.style.width = '95%';
+                    progressText.textContent = '95% (あと少し...)';
+                }
+                else if (data.type === 'done') {
+                    progressBar.style.width = '100%';
+                    progressText.textContent = '完了!';
+                    
+                    const blob = new Blob([data.wavBuffer], { type: 'audio/wav' });
+                    const finalUrl = URL.createObjectURL(blob);
+                    
+                    downloadLink.href = finalUrl;
+                    downloadArea.style.display = 'block';
+                    statusDiv.textContent = '生成が完了しました！下のボタンから保存してください。';
+                    generateBtn.disabled = false;
+                    renderWorker.terminate();
+                }
+                else if (data.type === 'error') {
+                    throw new Error(data.message);
+                }
+            };
+
+            // ワーカーにデータを送信して計算開始
+            renderWorker.postMessage({
+                inL: inL,
+                inR: inR,
+                validNotes: validNotes,
+                sampleRate: sampleRate,
+                totalSamples: totalSamples,
+                baseMidi: baseMidi,
+                pitchShift: pitchShift
+            });
 
         } catch (err) {
-            logMessage('❌ エラー: ' + err.message);
+            statusDiv.textContent = '生成中にエラーが発生しました: ' + err.message;
+            console.error(err);
+            generateBtn.disabled = false;
+            if (renderWorker) renderWorker.terminate();
         }
     });
-
-    // --- 録画のセットアップ ---
-    function startRecording() {
-        recordedChunks = [];
-        const audioDest = Tone.getContext().createMediaStreamDestination();
-        Tone.getDestination().connect(audioDest); // Tone.jsの出力を録音先に繋ぐ
-
-        const canvasStream = canvas.captureStream(30); // 30fpsでCanvasをキャプチャ
-        const audioStream = audioDest.stream;
-
-        // 映像と音声を合体
-        const combinedStream = new MediaStream([
-            ...canvasStream.getVideoTracks(),
-            ...audioStream.getAudioTracks()
-        ]);
-
-        // ブラウザの仕様上、MP4ではなくWebMになります
-        mediaRecorder = new MediaRecorder(combinedStream, { mimeType: 'video/webm' });
-        
-        mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) recordedChunks.push(e.data); };
-        mediaRecorder.onstop = () => {
-            const blob = new Blob(recordedChunks, { type: 'video/webm' });
-            const url = URL.createObjectURL(blob);
-            downloadBtn.onclick = () => {
-                const a = document.createElement('a');
-                a.style.display = 'none';
-                a.href = url;
-                a.download = 'otomad_output.webm';
-                document.body.appendChild(a);
-                a.click();
-                URL.revokeObjectURL(url);
-            };
-            downloadBtn.style.display = 'inline-block';
-            logMessage('✅ 録画が完了しました。ダウンロード可能です。');
-        };
-
-        mediaRecorder.start();
-        isRecording = true;
-        logMessage('⏺ 録画・録音を開始しました...');
-    }
-
-    // --- 再生の停止・リセット処理 ---
-    function stopAll() {
-        Tone.Transport.stop();
-        Tone.Transport.cancel(0); // スケジュールされたイベントを全消去
-        synths.forEach(s => s.dispose());
-        synths = [];
-        
-        if (isRecording && mediaRecorder.state !== "inactive") {
-            mediaRecorder.stop();
-            isRecording = false;
-        }
-
-        ctx.resetTransform();
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        
-        stopBtn.disabled = true;
-        logMessage('⏹ 停止しました。');
-    }
-    stopBtn.addEventListener('click', stopAll);
-
-    // --- 共通の再生準備 ---
-    async function preparePlayback() {
-        await Tone.start();
-        downloadBtn.style.display = 'none';
-        stopAll();
-        stopBtn.disabled = false;
-        startRecording();
-    }
-
-    // ==========================================
-    // ① MIDIに合わせて音声の音程を変える（音MAD風）
-    // ==========================================
-    btn1.addEventListener('click', async () => {
-        await preparePlayback();
-        const baseNote = parseInt(document.getElementById('baseNote').value);
-        logMessage('▶️ ① 音程変更再生を開始...');
-
-        const track = parsedMidi.tracks[0];
-        track.notes.forEach(note => {
-            Tone.Transport.schedule((time) => {
-                // 音声ソースを新しく作り、出力に繋ぐ
-                const source = new Tone.ToneBufferSource(audioBuffer).toDestination();
-                
-                // ピッチ変更の計算 (MIDIノートの差分から再生速度を計算)
-                // 例: baseNote(60) から note(62) になると、半音2つ分高いので再生速度が上がる
-                const pitchRatio = Math.pow(2, (note.midi - baseNote) / 12);
-                source.playbackRate.value = pitchRatio;
-                
-                source.start(time);
-            }, note.time);
-        });
-        Tone.Transport.start();
-    });
-
-    // ==========================================
-    // ② MIDIに合わせて映像エフェクト (反転等)
-    // ==========================================
-    btn2.addEventListener('click', async () => {
-        await preparePlayback();
-        logMessage('▶️ ② 映像エフェクト再生を開始...');
-        
-        let activeNotes = 0;
-
-        const track = parsedMidi.tracks[0];
-        track.notes.forEach(note => {
-            // ノートオン（音が鳴る瞬間）
-            Tone.Transport.schedule((time) => {
-                Tone.Draw.schedule(() => { activeNotes++; }, time);
-            }, note.time);
-            
-            // ノートオフ（音が消える瞬間）
-            Tone.Transport.schedule((time) => {
-                Tone.Draw.schedule(() => { activeNotes--; }, time + note.duration);
-            }, note.time + note.duration);
-        });
-
-        Tone.Transport.start();
-
-        // 映像描画ループ
-        function drawFrame() {
-            if (!isRecording) return; // 録画停止でループを抜ける
-            
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            ctx.save();
-
-            // 音が鳴っている数に応じてエフェクトを変える
-            if (activeNotes > 0) {
-                // 例: 左右反転エフェクト
-                ctx.translate(canvas.width, 0);
-                ctx.scale(-1, 1);
-                // ※ ここを工夫すれば「何個も並ぶ」なども可能です
-            }
-
-            if (sourceVideo.readyState >= 2) {
-                ctx.drawImage(sourceVideo, 0, 0, canvas.width, canvas.height);
-            }
-            ctx.restore();
-            requestAnimationFrame(drawFrame);
-        }
-        drawFrame();
-    });
-
-    // ==========================================
-    // ③ MIDIから音MADっぽいBGMを作成 (シンセ再生)
-    // ==========================================
-    btn3.addEventListener('click', async () => {
-        await preparePlayback();
-        logMessage('▶️ ③ BGM(シンセ)再生を開始...');
-
-        parsedMidi.tracks.forEach((track, index) => {
-            // トラックごとにシンセサイザーを用意
-            const synth = new Tone.PolySynth(Tone.Synth).toDestination();
-            synths.push(synth);
-
-            track.notes.forEach(note => {
-                Tone.Transport.schedule((time) => {
-                    synth.triggerAttackRelease(note.name, note.duration, time, note.velocity);
-                }, note.time);
-            });
-        });
-        Tone.Transport.start();
-    });
-
-    // ==========================================
-    // ④ MIDIに合わせてそのままの音程で連打再生
-    // ==========================================
-    btn4.addEventListener('click', async () => {
-        await preparePlayback();
-        logMessage('▶️ ④ 音程そのまま連打再生を開始...');
-
-        const track = parsedMidi.tracks[0];
-        track.notes.forEach(note => {
-            Tone.Transport.schedule((time) => {
-                const source = new Tone.ToneBufferSource(audioBuffer).toDestination();
-                source.start(time);
-                // 再生速度を変えないので、そのままの音声がMIDIのタイミングで鳴ります
-            }, note.time);
-        });
-        Tone.Transport.start();
-    });
-
 </script>
+
 </body>
 </html>
