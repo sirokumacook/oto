@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>音MADジェネレーター (Web Worker搭載・完全フリーズ対策版)</title>
+    <title>音MADジェネレーター (MP3出力・長時間モード搭載版)</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tonejs/midi"></script>
     <style>
@@ -156,7 +156,7 @@
     <h1>音MADジェネレーター</h1>
 
     <div class="section">
-        <h2>1. 音声のアップロードと切り抜き</h2>
+        <h2>1. 音声のアップロード</h2>
         <label>素材となる音声ファイル (MP3 / WAV)</label>
         <input type="file" id="audioUpload" accept="audio/mp3, audio/wav, audio/mpeg">
         
@@ -171,16 +171,13 @@
             </div>
         </div>
         
-        <label>切り抜いた音声の元の高さ（基準音）</label>
+        <label>音声の元の高さ（基準音）</label>
         <select id="baseNote">
             <option value="48">C3 (低いド / 男性ボーカル等)</option>
             <option value="60" selected>C4 (真ん中のド / 標準)</option>
             <option value="72">C5 (高いド / 女性ボーカル等)</option>
-            <option value="55">G3 (ソ)</option>
-            <option value="67">G4 (高いソ)</option>
         </select>
-        
-        <button class="preview-btn" id="previewBtn" disabled>切り抜いた音声をプレビュー</button>
+        <button class="preview-btn" id="previewBtn" disabled>範囲をプレビュー</button>
     </div>
 
     <div class="section">
@@ -190,11 +187,17 @@
         
         <label style="margin-top: 15px;">全体のピッチ調整 (半音単位)</label>
         <input type="number" id="pitchShift" value="0" min="-24" max="24" step="1">
+        
+        <label style="margin-top: 15px; color: #4daafc; font-weight: bold;">合成モードを選択</label>
+        <select id="synthMode">
+            <option value="continuous">長時間連続モード (長尺MP3をメロディに沿って変速)</option>
+            <option value="single">単音MADモード (短い音を切り抜いて何度も鳴らす)</option>
+        </select>
     </div>
 
     <div class="section">
-        <h2>3. 生成</h2>
-        <button id="generateBtn" disabled>音声を生成する</button>
+        <h2>3. MP3生成</h2>
+        <button id="generateBtn" disabled>MP3を生成する</button>
         
         <div id="progressContainer">
             <div id="progressBar"></div>
@@ -204,127 +207,184 @@
     </div>
 
     <div id="downloadArea">
-        <a id="downloadLink" href="#" download="otomad_output.wav">WAV形式でダウンロード</a>
+        <a id="downloadLink" href="#" download="otomad_output.mp3">MP3形式でダウンロード</a>
     </div>
 </div>
 
 <script>
     // --- Web Workerのコード（裏側の独立したスレッドで動く処理） ---
     const workerCode = `
+        // MP3変換用のライブラリを直接インポート
+        importScripts('https://cdn.jsdelivr.net/npm/lamejs@1.2.1/lame.min.js');
+
         self.onmessage = function(e) {
             try {
-                const { inL, inR, validNotes, sampleRate, totalSamples, baseMidi, pitchShift } = e.data;
+                const { inL, inR, validNotes, sampleRate, totalSamples, baseMidi, pitchShift, mode } = e.data;
                 const outL = new Float32Array(totalSamples);
                 const outR = new Float32Array(totalSamples);
                 const sourceLength = inL.length;
-                const totalNotes = validNotes.length;
+                let totalNotes = validNotes.length;
 
                 let processedNotes = 0;
                 let startTime = Date.now();
 
-                // 1. 音符の配置と波形の合成
-                for (let i = 0; i < totalNotes; i++) {
-                    const note = validNotes[i];
-                    let shiftedMidi = note.midi + pitchShift;
-                    shiftedMidi = Math.max(0, Math.min(127, shiftedMidi));
-                    const semitoneDiff = shiftedMidi - baseMidi;
-                    const playbackRate = Math.pow(2, semitoneDiff / 12.0);
-
-                    const startSample = Math.floor(note.time * sampleRate);
-                    const durationSamples = Math.floor(note.duration * sampleRate);
-                    const attackSamples = Math.floor(0.01 * sampleRate);
-                    const releaseSamples = Math.floor(0.05 * sampleRate);
-
-                    let outIdx = startSample;
+                if (mode === 'continuous') {
+                    // 長時間MP3を連続で読み込みながらピッチを変更するモード
+                    // 和音（同時に鳴る音）を整理して単音のメロディラインにする
+                    let monoNotes = [];
+                    let currentEnd = 0;
+                    validNotes.sort((a,b) => a.time - b.time);
+                    for(let i=0; i<totalNotes; i++) {
+                        if(validNotes[i].time >= currentEnd) {
+                            monoNotes.push(validNotes[i]);
+                            currentEnd = validNotes[i].time + validNotes[i].duration;
+                        }
+                    }
+                    
+                    const monoTotal = monoNotes.length;
                     let srcPos = 0;
+                    let lastNoteEndSample = 0;
 
-                    for (let j = 0; j < durationSamples + releaseSamples; j++) {
-                        if (outIdx >= totalSamples) break;
-                        if (srcPos >= sourceLength - 1) break;
-
-                        const idxFloor = Math.floor(srcPos);
-                        const frac = srcPos - idxFloor;
-                        const valL = inL[idxFloor] * (1 - frac) + inL[idxFloor + 1] * frac;
-                        const valR = inR ? (inR[idxFloor] * (1 - frac) + inR[idxFloor + 1] * frac) : valL;
-
-                        let env = 1.0;
-                        if (j < attackSamples) env = j / attackSamples;
-                        else if (j > durationSamples) env = 1.0 - ((j - durationSamples) / releaseSamples);
-                        if (env < 0) env = 0;
-
-                        const vol = note.velocity * 0.5 * env;
-
-                        outL[outIdx] += valL * vol;
-                        outR[outIdx] += valR * vol;
-
-                        outIdx++;
-                        srcPos += playbackRate;
+                    for (let i = 0; i < monoTotal; i++) {
+                        const note = monoNotes[i];
+                        const startSample = Math.floor(note.time * sampleRate);
+                        const durationSamples = Math.floor(note.duration * sampleRate);
+                        
+                        // 前の音符から今の音符までの空白時間は、音声を通常の速度で進める
+                        if (startSample > lastNoteEndSample) {
+                            srcPos += (startSample - lastNoteEndSample);
+                        }
+                        
+                        let shiftedMidi = note.midi + pitchShift;
+                        shiftedMidi = Math.max(0, Math.min(127, shiftedMidi));
+                        const semitoneDiff = shiftedMidi - baseMidi;
+                        const playbackRate = Math.pow(2, semitoneDiff / 12.0);
+                        
+                        let outIdx = startSample;
+                        
+                        for (let j = 0; j < durationSamples; j++) {
+                            if (outIdx >= totalSamples || srcPos >= sourceLength - 1) break;
+                            
+                            const idxFloor = Math.floor(srcPos);
+                            const frac = srcPos - idxFloor;
+                            const valL = inL[idxFloor] * (1 - frac) + inL[idxFloor + 1] * frac;
+                            const valR = inR ? (inR[idxFloor] * (1 - frac) + inR[idxFloor + 1] * frac) : valL;
+                            
+                            // プツプツ音防止
+                            let env = 1.0;
+                            if (j < 441) env = j / 441;
+                            else if (j > durationSamples - 441) env = (durationSamples - j) / 441;
+                            
+                            const vol = note.velocity * 0.8 * env;
+                            outL[outIdx] += valL * vol;
+                            outR[outIdx] += valR * vol;
+                            
+                            outIdx++;
+                            srcPos += playbackRate;
+                        }
+                        lastNoteEndSample = startSample + durationSamples;
+                        
+                        processedNotes++;
+                        if (processedNotes % 20 === 0) {
+                            self.postMessage({ type: 'progress', processed: processedNotes, total: monoTotal, elapsed: Date.now() - startTime });
+                        }
                     }
 
-                    processedNotes++;
-                    
-                    // 定期的に進行状況をメイン画面に送信
-                    if (processedNotes % 100 === 0 || processedNotes === totalNotes) {
-                        self.postMessage({
-                            type: 'progress',
-                            processed: processedNotes,
-                            total: totalNotes,
-                            elapsed: Date.now() - startTime
-                        });
+                } else {
+                    // 単音MADモード（毎回最初から再生）
+                    for (let i = 0; i < totalNotes; i++) {
+                        const note = validNotes[i];
+                        let shiftedMidi = note.midi + pitchShift;
+                        shiftedMidi = Math.max(0, Math.min(127, shiftedMidi));
+                        const semitoneDiff = shiftedMidi - baseMidi;
+                        const playbackRate = Math.pow(2, semitoneDiff / 12.0);
+
+                        const startSample = Math.floor(note.time * sampleRate);
+                        const durationSamples = Math.floor(note.duration * sampleRate);
+                        const attackSamples = Math.floor(0.01 * sampleRate);
+                        const releaseSamples = Math.floor(0.05 * sampleRate);
+
+                        let outIdx = startSample;
+                        let srcPos = 0; 
+
+                        for (let j = 0; j < durationSamples + releaseSamples; j++) {
+                            if (outIdx >= totalSamples) break;
+                            if (srcPos >= sourceLength - 1) break;
+
+                            const idxFloor = Math.floor(srcPos);
+                            const frac = srcPos - idxFloor;
+                            const valL = inL[idxFloor] * (1 - frac) + inL[idxFloor + 1] * frac;
+                            const valR = inR ? (inR[idxFloor] * (1 - frac) + inR[idxFloor + 1] * frac) : valL;
+
+                            let env = 1.0;
+                            if (j < attackSamples) env = j / attackSamples;
+                            else if (j > durationSamples) env = 1.0 - ((j - durationSamples) / releaseSamples);
+                            if (env < 0) env = 0;
+
+                            const vol = note.velocity * 0.5 * env;
+                            outL[outIdx] += valL * vol;
+                            outR[outIdx] += valR * vol;
+
+                            outIdx++;
+                            srcPos += playbackRate;
+                        }
+                        processedNotes++;
+                        if (processedNotes % 100 === 0) {
+                            self.postMessage({ type: 'progress', processed: processedNotes, total: totalNotes, elapsed: Date.now() - startTime });
+                        }
                     }
                 }
 
-                // 2. 音量調整とWAVファイルへの変換
-                self.postMessage({ type: 'status', message: '音量調整・WAVファイル変換中...' });
+                // 2. MP3ファイルへのエンコード
+                self.postMessage({ type: 'status', message: '音量調整とMP3への変換を行っています...(数十秒かかる場合があります)' });
                 
                 let maxAmp = 0;
                 for (let i = 0; i < totalSamples; i++) {
-                    const absL = Math.abs(outL[i]);
-                    const absR = Math.abs(outR[i]);
-                    if (absL > maxAmp) maxAmp = absL;
-                    if (absR > maxAmp) maxAmp = absR;
+                    if (Math.abs(outL[i]) > maxAmp) maxAmp = Math.abs(outL[i]);
+                    if (Math.abs(outR[i]) > maxAmp) maxAmp = Math.abs(outR[i]);
                 }
 
                 const volumeBoost = maxAmp > 0 ? (0.95 / maxAmp) : 1;
-                const numChannels = 2;
-                const bufferLength = 44 + totalSamples * numChannels * 2;
-                const wavBuffer = new ArrayBuffer(bufferLength);
-                const view = new DataView(wavBuffer);
-
-                const writeString = (view, offset, string) => {
-                    for (let i = 0; i < string.length; i++) {
-                        view.setUint8(offset + i, string.charCodeAt(i));
-                    }
-                };
-
-                writeString(view, 0, 'RIFF');
-                view.setUint32(4, 36 + totalSamples * numChannels * 2, true);
-                writeString(view, 8, 'WAVE');
-                writeString(view, 12, 'fmt ');
-                view.setUint32(16, 16, true);
-                view.setUint16(20, 1, true);
-                view.setUint16(22, numChannels, true);
-                view.setUint32(24, sampleRate, true);
-                view.setUint32(28, sampleRate * numChannels * 2, true);
-                view.setUint16(32, numChannels * 2, true);
-                view.setUint16(34, 16, true);
-                writeString(view, 36, 'data');
-                view.setUint32(40, totalSamples * numChannels * 2, true);
-
-                let offset = 44;
+                
+                // Float32をInt16に変換
+                const int16L = new Int16Array(totalSamples);
+                const int16R = new Int16Array(totalSamples);
                 for (let i = 0; i < totalSamples; i++) {
                     let sL = outL[i] * volumeBoost;
                     let sR = outR[i] * volumeBoost;
                     sL = Math.max(-1, Math.min(1, sL));
                     sR = Math.max(-1, Math.min(1, sR));
-                    view.setInt16(offset, sL < 0 ? sL * 0x8000 : sL * 0x7FFF, true);
-                    offset += 2;
-                    view.setInt16(offset, sR < 0 ? sR * 0x8000 : sR * 0x7FFF, true);
-                    offset += 2;
+                    int16L[i] = sL < 0 ? sL * 0x8000 : sL * 0x7FFF;
+                    int16R[i] = sR < 0 ? sR * 0x8000 : sR * 0x7FFF;
                 }
 
-                // 完成したWAVデータをメイン画面に送信
-                self.postMessage({ type: 'done', wavBuffer: wavBuffer }, [wavBuffer]);
+                // lamejsでMP3にエンコード (192kbps)
+                const mp3encoder = new lamejs.Mp3Encoder(2, sampleRate, 192);
+                const mp3Data = [];
+                const sampleBlockSize = 1152; 
+
+                for (let i = 0; i < totalSamples; i += sampleBlockSize) {
+                    const end = Math.min(i + sampleBlockSize, totalSamples);
+                    const length = end - i;
+                    const leftChunk = new Int16Array(length);
+                    const rightChunk = new Int16Array(length);
+                    for(let j = 0; j < length; j++) {
+                        leftChunk[j] = int16L[i+j];
+                        rightChunk[j] = int16R[i+j];
+                    }
+                    const mp3buf = mp3encoder.encodeBuffer(leftChunk, rightChunk);
+                    if (mp3buf.length > 0) {
+                        mp3Data.push(new Int8Array(mp3buf));
+                    }
+                }
+                
+                const mp3buf = mp3encoder.flush();
+                if (mp3buf.length > 0) {
+                    mp3Data.push(new Int8Array(mp3buf));
+                }
+
+                // 完成したMP3データをメイン画面に送信
+                self.postMessage({ type: 'done', mp3Data: mp3Data });
 
             } catch (error) {
                 self.postMessage({ type: 'error', message: error.message });
@@ -332,7 +392,6 @@
         };
     `;
 
-    // 文字列からWeb Workerを生成
     const blob = new Blob([workerCode], { type: 'application/javascript' });
     const workerUrl = URL.createObjectURL(blob);
     let renderWorker = null;
@@ -348,6 +407,7 @@
     const trimEnd = document.getElementById('trimEnd');
     const baseNoteSelect = document.getElementById('baseNote');
     const pitchShiftInput = document.getElementById('pitchShift');
+    const synthModeSelect = document.getElementById('synthMode');
     const previewBtn = document.getElementById('previewBtn');
     const generateBtn = document.getElementById('generateBtn');
     const statusDiv = document.getElementById('status');
@@ -427,7 +487,6 @@
             let maxDuration = 0;
             let validNotes = [];
 
-            // MIDIデータの解析
             midiData.tracks.forEach(track => {
                 track.notes.forEach(note => {
                     const time = parseFloat(note.time) || 0;
@@ -462,20 +521,19 @@
 
             const baseMidi = parseInt(baseNoteSelect.value);
             const pitchShift = parseInt(pitchShiftInput.value) || 0;
+            const selectedMode = synthModeSelect.value;
 
             statusDiv.textContent = 'バックグラウンドで処理を開始しました。';
 
-            // 既存のワーカーがあれば破棄して新しく作り直す
             if (renderWorker) renderWorker.terminate();
             renderWorker = new Worker(workerUrl);
 
-            // ワーカーからのメッセージ受信処理
             renderWorker.onmessage = function(e) {
                 const data = e.data;
 
                 if (data.type === 'progress') {
-                    // 進行状況の計算 (合成処理を全体の90%とする)
-                    const percent = Math.floor((data.processed / data.total) * 90);
+                    // 合成処理を全体の80%とする
+                    const percent = Math.floor((data.processed / data.total) * 80);
                     const elapsedSec = data.elapsed / 1000;
                     
                     let remainingSec = 0;
@@ -489,19 +547,20 @@
                 } 
                 else if (data.type === 'status') {
                     statusDiv.textContent = data.message;
-                    progressBar.style.width = '95%';
-                    progressText.textContent = '95% (あと少し...)';
+                    progressBar.style.width = '85%';
+                    progressText.textContent = '85% (MP3変換中...)';
                 }
                 else if (data.type === 'done') {
                     progressBar.style.width = '100%';
                     progressText.textContent = '完了!';
                     
-                    const blob = new Blob([data.wavBuffer], { type: 'audio/wav' });
+                    // 送られてきたMP3配列からBlobを生成
+                    const blob = new Blob(data.mp3Data, { type: 'audio/mp3' });
                     const finalUrl = URL.createObjectURL(blob);
                     
                     downloadLink.href = finalUrl;
                     downloadArea.style.display = 'block';
-                    statusDiv.textContent = '生成が完了しました！下のボタンから保存してください。';
+                    statusDiv.textContent = 'MP3の生成が完了しました！下のボタンから保存してください。';
                     generateBtn.disabled = false;
                     renderWorker.terminate();
                 }
@@ -510,7 +569,6 @@
                 }
             };
 
-            // ワーカーにデータを送信して計算開始
             renderWorker.postMessage({
                 inL: inL,
                 inR: inR,
@@ -518,7 +576,8 @@
                 sampleRate: sampleRate,
                 totalSamples: totalSamples,
                 baseMidi: baseMidi,
-                pitchShift: pitchShift
+                pitchShift: pitchShift,
+                mode: selectedMode
             });
 
         } catch (err) {
